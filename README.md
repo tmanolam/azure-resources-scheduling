@@ -2,7 +2,7 @@
 
 > Tag-driven start/stop scheduling for Azure resources (VM, VMSS, AKS, PostgreSQL/MySQL Flexible Server, SQL MI, Application Gateway), running as a timer-triggered Azure Function and deployed with Terraform.
 
-**Last updated:** 2026-10-03 · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+**Last updated:** 2026-10-03 (v0.2) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 
 ## Table of Contents
 
@@ -79,7 +79,7 @@ azure-power-scheduler/
 │   ├── holidays/
 │   │   └── public-2026.json
 │   └── profiles/
-│       ├── weekday-0800-2000.json
+│       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok
 │       └── sandbox-default.json
 ├── infra/
 │   ├── envs/
@@ -97,7 +97,7 @@ azure-power-scheduler/
 │       ├── app_config/             # store + keys from /config
 │       └── monitoring/             # App Insights, alerts, action group
 ├── src/                            # Azure Function (Python 3.11)
-│   ├── function_app.py             # timer + HTTP triggers
+│   ├── function_app.py             # timer trigger (HTTP on-demand trigger: phase 2)
 │   ├── engine/                     # discovery, desired-state evaluation, ordering
 │   ├── handlers/                   # vm.py, aks.py, postgres_flex.py, ...
 │   ├── host.json
@@ -219,7 +219,7 @@ excluded_scope_ids = [
   "/providers/Microsoft.Management/managementGroups/<org>-platform",
 ]
 
-enabled_resource_types = ["vm", "vmss", "aks", "postgres-flex", "mysql-flex"]
+enabled_resource_types = ["vm", "vmss", "aks", "postgres-flex", "mysql-flex", "sqlmi"]
 
 reconcile_schedule  = "0 */15 * * * *"   # NCRONTAB, UTC
 dry_run             = true               # keep true until verified
@@ -307,7 +307,6 @@ az functionapp deployment source config-zip \
 ```
 Functions in func-pwrsched-dev:
     reconcile - [timerTrigger]
-    run - [httpTrigger]
 ```
 
 Re-run this step whenever the code in `src/` changes. Configuration changes do **not** need a code redeploy.
@@ -339,20 +338,9 @@ Check that:
 - [ ] a cycle summary appears every 15 minutes;
 - [ ] only tagged resources from the in-scope MGs appear;
 - [ ] no Platform MG resources appear;
+- [ ] resources in subscriptions tagged `environment=prod` are logged with reason `production-excluded` and never acted on;
 - [ ] `desired` matches what you expect for the current local time of each profile;
 - [ ] `dryRun` is `true` and no start/stop entries appear in the Activity Log for the managed identity.
-
-Optionally, test the on-demand endpoint in dry-run (requires the `PowerScheduler.Operator` app role):
-
-```bash
-TOKEN=$(az account get-access-token --resource "api://func-pwrsched-dev" --query accessToken -o tsv)
-
-curl -s -X POST "https://${FUNC_APP}.azurewebsites.net/api/run" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"action":"start","scope":"/subscriptions/<sub-id>/resourceGroups/<rg>","resourceTypes":["vm"],"dryRun":true}'
-```
-
-> 📝 Note: The application ID URI (`api://...`) is output by Terraform as `api_application_id_uri` when Entra ID authentication is enabled on the Function App. The default hostname may differ for Flex Consumption apps; use `az functionapp show -g "$RG" -n "$FUNC_APP" --query defaultHostName -o tsv`.
 
 ### Step 7 – Go live
 
@@ -373,18 +361,23 @@ The change takes effect on the next cycle. Watch the first live cycles in the lo
 
 | Tag | Example | Effect |
 |---|---|---|
-| `schedule-profile` | `weekday-0800-2000` | Opts the resource in. Can be set on a resource, resource group or subscription; the most specific wins. |
+| `schedule-profile` | `weekday-0830-1730` | Opts the resource in. Can be set on a resource, resource group or subscription; the most specific wins. |
 | `schedule-enabled` | `false` | Temporarily opts out |
-| `schedule-override-until` | `2026-10-10T23:00+00:00` | Keeps the resource running until this time (include the UTC offset) |
+| `schedule-override-state` | `running` or `stopped` | State to hold during an override (default `running`) |
+| `schedule-override-until` | `2026-10-10T21:00+07:00` | End of the override; the schedule resumes after this time (include the UTC offset) |
 | `schedule-order` | `1` | Start order (1 = first). Stop runs in reverse. |
+
+> 📝 Note: Production subscriptions (tagged `environment=prod`) are always excluded. Tagging production resources has no effect.
 
 ### Schedule profile (`config/profiles/<name>.json`)
 
+The standard profile, `config/profiles/weekday-0830-1730.json`:
+
 ```json
 {
-  "timezone": "<IANA timezone>",
+  "timezone": "Asia/Bangkok",
   "runWindows": [
-    { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:00", "stop": "20:00" }
+    { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:30", "stop": "17:30" }
   ],
   "holidayCalendar": "public-2026",
   "stopOnHolidays": true,
@@ -392,7 +385,7 @@ The change takes effect on the next cycle. Watch the first live cycles in the lo
 }
 ```
 
-The file name (without `.json`) is the profile name used in the `schedule-profile` tag.
+The file name (without `.json`) is the profile name used in the `schedule-profile` tag. With these offsets, databases (order 1) start at 08:00, AKS and Application Gateway (order 2) at 08:15, and VMs (order 3) at 08:30. Everything stops at 17:30, in reverse order.
 
 ### Terraform variables
 
@@ -421,7 +414,7 @@ All configuration changes follow the same pattern: edit files, then `terraform p
 ### Change a schedule
 
 ```bash
-vi config/profiles/weekday-0800-2000.json     # e.g. change "stop" to "19:00"
+vi config/profiles/weekday-0830-1730.json     # e.g. change "stop" to "17:00"
 cd infra/envs/dev && terraform plan -out tfplan && terraform apply tfplan
 ```
 
@@ -445,20 +438,34 @@ Add the handler key (for example `sqlmi` or `appgw`) to `enabled_resource_types`
 # Tag a whole resource group
 az tag update --operation Merge \
   --resource-id "/subscriptions/<sub-id>/resourceGroups/<rg>" \
-  --tags schedule-profile=weekday-0800-2000
+  --tags schedule-profile=weekday-0830-1730
 
 # Make the database start first
 az tag update --operation Merge --resource-id "<postgres-flex-resource-id>" --tags schedule-order=1
 ```
 
-### Keep resources running late (override)
+### Ad-hoc start or stop (override)
+
+Phase 1 has no on-demand endpoint (planned for phase 2). To start or stop resources outside the schedule, set an override. The next cycle (within 15 minutes) applies it, and the schedule resumes when it expires.
 
 ```bash
-UNTIL=$(date -u -d '+4 hours' +%Y-%m-%dT%H:%M+00:00)   # GNU date; on macOS: date -u -v+4H +%Y-%m-%dT%H:%M+00:00
-az tag update --operation Merge \
-  --resource-id "/subscriptions/<sub-id>/resourceGroups/<rg>" \
-  --tags schedule-override-until="$UNTIL"
+RID="/subscriptions/<sub-id>/resourceGroups/<rg>"      # resource, resource group or subscription
+UNTIL=$(TZ=Asia/Bangkok date -d '+4 hours' +%Y-%m-%dT%H:%M+07:00)   # GNU date; macOS: TZ=Asia/Bangkok date -v+4H +%Y-%m-%dT%H:%M+07:00
+
+# Keep running (e.g. work late or at the weekend)
+az tag update --operation Merge --resource-id "$RID" \
+  --tags schedule-override-state=running schedule-override-until="$UNTIL"
+
+# Keep stopped (e.g. not needed this afternoon)
+az tag update --operation Merge --resource-id "$RID" \
+  --tags schedule-override-state=stopped schedule-override-until="$UNTIL"
+
+# Cancel an override early
+az tag update --operation Delete --resource-id "$RID" \
+  --tags schedule-override-state schedule-override-until
 ```
+
+> 📝 Note: Overrides on a resource group or subscription apply to every tagged resource inside it. Expired override tags are ignored, so removing them is optional.
 
 ### Opt out temporarily
 

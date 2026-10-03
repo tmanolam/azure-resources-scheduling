@@ -3,11 +3,11 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.1 (Draft for review) |
+| Version | 0.2 (Stakeholder decisions incorporated) |
 | Last updated | 2026-10-03 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | Draft – pending stakeholder review |
+| Status | Draft – open issues OI-01, OI-08, OI-09 remain |
 
 ## Table of Contents
 
@@ -29,6 +29,7 @@
 16. [Risks](#16-risks)
 17. [Open Issues and Gaps](#17-open-issues-and-gaps)
 18. [Glossary](#18-glossary)
+19. [Change History](#19-change-history)
 
 ---
 
@@ -60,10 +61,9 @@ The scheduler is flexible in three ways:
 
 - Scheduled start/stop (power management) of the resource types listed in [Section 8](#8-resource-type-handler-requirements).
 - Scope selection at management group, subscription and resource group level, with include and exclude lists.
-- Tag-based opt-in, opt-out and temporary override per resource, resource group or subscription.
+- Tag-based opt-in, opt-out and temporary override (keep running or keep stopped) per resource, resource group or subscription.
 - Named, timezone-aware schedule profiles, including weekdays, run windows and holiday calendars.
 - Dry-run mode (evaluate and log only, no changes).
-- On-demand execution through an authenticated HTTP endpoint.
 - Logging, alerting and reporting.
 - Terraform code for all infrastructure, identity, RBAC and configuration.
 - A README with Terraform CLI deployment steps.
@@ -75,7 +75,10 @@ The scheduler is flexible in three ways:
 - Deletion or re-creation of resources.
 - CI/CD pipeline automation (Jenkins or other). Deployment is by Terraform CLI in this phase.
 - A self-service web portal UI (possible future phase).
-- Production workloads, unless explicitly opted in (see BR-003).
+- **On-demand HTTP endpoint** (`POST /api/run`): deferred to phase 2 (decision D-05). In phase 1, ad-hoc needs are handled with override tags (FR-025).
+- Production workloads: always excluded, with no opt-in (decision D-06, BR-003).
+- Azure Cosmos DB: has no stop/pause operation.
+- Azure SQL Database scale-down scheduling: pending decision OI-09.
 
 ## 4. Stakeholder Register
 
@@ -110,7 +113,7 @@ Tenant Root Group
 | Component | Purpose |
 |---|---|
 | Resource group `rg-pwrsched-<env>-<region>` | Holds all scheduler resources (Management subscription) |
-| Function App (Flex Consumption, Linux, Python 3.11) | Hosts the timer-triggered reconciliation function and the HTTP on-demand function |
+| Function App (Flex Consumption, Linux, Python 3.11) | Hosts the timer-triggered reconciliation function (an HTTP on-demand function is added in phase 2) |
 | Storage account | Functions runtime storage (`AzureWebJobsStorage`), deployment package container, timer lease |
 | User-assigned managed identity | Identity used for Azure Resource Manager (ARM), Resource Graph, App Configuration and Storage access |
 | Azure App Configuration | Stores schedule profiles, scope include/exclude lists and global settings |
@@ -147,18 +150,19 @@ Tags can be set on a resource, a resource group or a subscription. The **most sp
 |---|---|---|---|
 | `schedule-profile` | Name of a defined profile | Yes (to opt in) | Schedule profile applied to the resource |
 | `schedule-enabled` | `true` \| `false` | No (default `true` when a profile is set) | Opt out without removing the profile |
-| `schedule-override-until` | ISO 8601 date-time with offset, e.g. `2026-10-10T18:00+07:00` | No | Keep the resource **running** until this time, then resume the schedule |
+| `schedule-override-state` | `running` \| `stopped` | No (default `running` when `schedule-override-until` is set) | State to hold while the override is active |
+| `schedule-override-until` | ISO 8601 date-time with offset, e.g. `2026-10-10T21:00+07:00` | With `schedule-override-state` | Hold the override state until this time, then resume the schedule. Ignored when in the past. |
 | `schedule-order` | Integer 1–9 | No (default per type, see 8.2) | Start order (ascending); stop runs in reverse |
 
 ### 6.2 Schedule profile schema (App Configuration)
 
-Profiles are stored as JSON values under the key prefix `pwrsched:profiles:<name>`.
+Profiles are stored as JSON values under the key prefix `pwrsched:profiles:<name>`. The **standard profile** agreed for phase 1 is `weekday-0830-1730` (decision D-02):
 
 ```json
 {
-  "timezone": "<IANA timezone, e.g. Europe/London>",
+  "timezone": "Asia/Bangkok",
   "runWindows": [
-    { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:00", "stop": "20:00" }
+    { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:30", "stop": "17:30" }
   ],
   "holidayCalendar": "public-2026",
   "stopOnHolidays": true,
@@ -171,7 +175,9 @@ Rules for profile values:
 - `timezone` must be a valid IANA timezone name; each profile sets its own.
 - Several `runWindows` per profile are allowed, for example a separate Saturday window.
 - A window where `stop` is earlier than `start` crosses midnight (for example 20:00–02:00).
-- `startOffsetMinutesByOrder` lets dependencies such as databases start earlier than the apps that use them.
+- `startOffsetMinutesByOrder` lets dependencies such as databases start earlier than the apps that use them. With the standard profile, databases (order 1) start at 08:00, AKS and Application Gateway (order 2) at 08:15, and VMs (order 3) at 08:30. Each step aligns with a 15-minute cycle.
+- `Asia/Bangkok` is UTC+7 with no daylight saving time.
+- Whether `stopOnHolidays` is used, and the holiday calendar source, is open (OI-08).
 
 ### 6.3 Global settings (App Configuration)
 
@@ -214,11 +220,19 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-020 | The system shall keep a resource running while `schedule-override-until` is in the future and resume the schedule after it expires. | M |
+| FR-020 | While `schedule-override-until` is in the future, the system shall treat `schedule-override-state` (default `running`) as the desired state, and resume the schedule after it expires. | M |
 | FR-021 | The system shall skip resources tagged `schedule-enabled=false`. | M |
-| FR-022 | The system shall expose an HTTP endpoint (`POST /api/run`) that accepts `action` (`start`/`stop`/`reconcile`), `scope`, `resourceTypes[]` and `dryRun`. | S |
-| FR-023 | The HTTP endpoint shall require Microsoft Entra ID authentication and authorise callers by app role (e.g. `PowerScheduler.Operator`). | S |
-| FR-024 | On-demand `start`/`stop` shall be one-off. The next scheduled cycle shall still apply the schedule unless an override tag is set. ⚠️ GAP: confirm expected behaviour (see OI-03). | S |
+| FR-025 | Phase 1 ad-hoc operations: an operator sets `schedule-override-state` and `schedule-override-until` on a resource, resource group or subscription. The next cycle (≤ 15 min) applies the override state. No separate manual start/stop is required. | M |
+| FR-026 | The system shall log a warning for override tags with an invalid date or state, and ignore them. | M |
+
+**Phase 2 backlog (Won't in phase 1, decision D-05):**
+
+| ID | Requirement | Priority |
+|---|---|---|
+| FR-022 | The system shall expose an HTTP endpoint (`POST /api/run`) that accepts `action` (`start`/`stop`/`reconcile`), `scope`, `resourceTypes[]` and `dryRun`. | W |
+| FR-023 | The HTTP endpoint shall require Microsoft Entra ID authentication and authorise callers by app role (`PowerScheduler.Operator`). | W |
+| FR-024 | An on-demand `start` or `stop` shall set `schedule-override-state` to the requested state and `schedule-override-until` to now + 4 hours on the targeted resources (decision D-03). Requires `Microsoft.Resources/tags/write` for the managed identity. | W |
+| FR-027 | Network exposure of the endpoint (private via hub, or public with Entra ID) shall be decided before phase 2 build. | W |
 
 ### 7.4 Safety
 
@@ -240,10 +254,10 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | `aks` | `Microsoft.ContainerService/managedClusters` | Start cluster | Stop cluster | 2 | M |
 | `postgres-flex` | `Microsoft.DBforPostgreSQL/flexibleServers` | Start | Stop | 1 | M |
 | `mysql-flex` | `Microsoft.DBforMySQL/flexibleServers` | Start | Stop | 1 | M |
-| `sqlmi` | `Microsoft.Sql/managedInstances` | Start | Stop | 1 | S |
+| `sqlmi` | `Microsoft.Sql/managedInstances` | Start | Stop | 1 | M |
 | `appgw` | `Microsoft.Network/applicationGateways` | Start | Stop | 2 | C |
 | `synapse-pool` | `Microsoft.Synapse/workspaces/sqlPools` | Resume | Pause | 1 | C |
-| `sqldb` | `Microsoft.Sql/servers/databases` | Scale up to tagged SKU | Scale down to tagged SKU | 1 | W |
+| `sqldb` | `Microsoft.Sql/servers/databases` | Scale up to tagged SKU | Scale down to tagged SKU | 1 | W (pending OI-09) |
 | `appservice` | `Microsoft.Web/serverfarms` | Scale up | Scale down | 3 | W |
 
 ### 8.2 Handler-specific requirements
@@ -253,8 +267,9 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | HR-001 | VM: stop shall use deallocate. VMs with ephemeral OS disks shall be skipped and logged as unsupported. |
 | HR-002 | AKS: the handler shall read `powerState.code` and act only when the cluster `provisioningState` is `Succeeded`. |
 | HR-003 | PostgreSQL/MySQL Flexible: the platform auto-starts servers after 7 days stopped. The reconciliation shall re-stop them when the desired state is `Stopped`. |
-| HR-004 | Servers configured for high availability or with read replicas shall be handled per platform constraints. ⚠️ GAP: confirm whether HA servers are in scope (OI-04). |
+| HR-004 | All database types with a stop operation are in scope, including high-availability servers and servers with read replicas (decision D-04). Where the platform rejects a stop or start because of HA or replica configuration, the handler shall log the reason, skip the resource, and not retry it until its configuration changes. Behaviour is validated during the pilot. |
 | HR-005 | Each handler shall be a separate module implementing a common interface (`get_state`, `start`, `stop`) so new types can be added without changing the core engine. |
+| HR-006 | Azure SQL Database has no stop operation. Serverless databases with auto-pause need no scheduler action and shall be logged as `not-applicable`. Provisioned databases are handled only if the `sqldb` handler is approved (OI-09). |
 
 ## 9. Business Rules
 
@@ -269,13 +284,15 @@ Description : A resource is managed only if a valid schedule-profile tag resolve
 Constraint  : Untagged resources are ignored.
 Source      : Workload owners
 
-BR-003: Production protection
-Description : Resources in subscriptions tagged environment=prod are skipped unless
-              schedule-allow-prod=true is set at subscription level.
-Source      : Security / Governance
+BR-003: Production exclusion (hard rule)
+Description : Resources in subscriptions tagged environment=prod are always skipped.
+              There is no opt-in mechanism.
+Constraint  : Enforced in the engine regardless of other tags or configuration.
+Source      : Decision D-06
 
 BR-004: Override precedence
-Description : A valid future schedule-override-until always results in desired state Running.
+Description : A valid future schedule-override-until always takes precedence over the schedule.
+              The desired state is schedule-override-state (default Running).
 Source      : Workload owners
 
 BR-005: Unknown profile
@@ -312,7 +329,7 @@ Source      : FinOps
 | SEC-003 | The custom role shall be assigned only at in-scope management groups (Landing Zones, Sandbox), never at Tenant Root, the intermediate root or Platform. |
 | SEC-004 | The managed identity shall have **App Configuration Data Reader** on the App Configuration store and the required Storage data roles on the runtime storage account. |
 | SEC-005 | The storage account shall disable shared-key access and public blob access, and enforce TLS 1.2 or later. |
-| SEC-006 | The Function App shall enforce HTTPS only, minimum TLS 1.2, FTP disabled, and Entra ID authentication on HTTP endpoints. |
+| SEC-006 | The Function App shall enforce HTTPS only, minimum TLS 1.2 and FTP disabled. Phase 1 exposes no HTTP-triggered functions; the timer function is not callable externally. |
 | SEC-007 | Private endpoints and VNet integration shall be **configurable** (Terraform variable) for Storage and App Configuration to align with the hub/spoke design. |
 | SEC-008 | All write actions shall be traceable in the Azure Activity Log under the managed identity and in the scheduler's own audit log. |
 
@@ -399,8 +416,8 @@ As a workload owner,
 I want my dev VMs to be deallocated outside office hours,
 So that we do not pay for idle compute.
 
-Given a VM tagged schedule-profile=weekday-0800-2000 and currently Running
-When  a reconciliation cycle runs on Friday at 20:05 in the profile timezone
+Given a VM tagged schedule-profile=weekday-0830-1730 and currently Running
+When  a reconciliation cycle runs on Friday at 17:30 Bangkok time
 Then  the VM deallocate operation is submitted
 And   an audit record with action=stop and result=submitted is written
 
@@ -414,10 +431,11 @@ As a workload owner,
 I want to keep my UAT environment running late tonight,
 So that the release test can finish.
 
-Given resources tagged schedule-override-until=<today 23:00 with offset>
-When  cycles run between 20:00 and 23:00
+Given resources tagged schedule-override-state=running
+And   schedule-override-until=<today 21:00+07:00>
+When  cycles run between 17:30 and 21:00
 Then  the resources are not stopped
-And   the first cycle after 23:00 stops them
+And   the first cycle after 21:00 stops them
 
 Priority: Must
 ```
@@ -431,9 +449,9 @@ So that applications start without connection errors.
 
 Given a PostgreSQL Flexible Server (order 1) and an AKS cluster (order 2) on the same profile
 And   the profile defines startOffsetMinutesByOrder {"1": -30, "2": -15}
-When  the cycle runs at 07:30
+When  the cycle runs at 08:00 Bangkok time
 Then  only the database start is submitted
-And   the AKS start is submitted in the 07:45 cycle
+And   the AKS start is submitted in the 08:15 cycle
 
 Priority: Should
 ```
@@ -445,8 +463,8 @@ As the platform team,
 I want platform resources never to be touched,
 So that the hub network and shared services stay available.
 
-Given an Azure Firewall in the Connectivity subscription tagged schedule-profile=weekday-0800-2000
-When  any reconciliation or on-demand run executes
+Given an Azure Firewall in the Connectivity subscription tagged schedule-profile=weekday-0830-1730
+When  any reconciliation cycle runs
 Then  no action is submitted for the firewall
 And   a warning "excluded scope/type" is logged
 
@@ -457,30 +475,48 @@ Priority: Must
 
 ```
 As the platform team,
-I want to change a profile's stop time from 20:00 to 19:00,
+I want to change a profile's stop time from 17:30 to 17:00,
 So that we save more cost.
 
 Given the profile JSON is updated and terraform apply completes
-When  the next cycle runs after 19:00
+When  the next cycle runs at or after 17:00
 Then  resources on that profile are stopped
 And   no function code redeployment was required
 
 Priority: Must
 ```
 
-### US-06 On-demand start (dry-run)
+### US-06 Ad-hoc stop during business hours (phase 1, tag-based)
 
 ```
-As an operator,
-I want to preview which resources would start in a resource group,
-So that I can verify scope before acting.
+As a workload owner,
+I want to stop my test environment for the afternoon,
+So that we save cost while nobody uses it.
 
-Given I call POST /api/run with action=start, scope=<RG ID>, dryRun=true and a valid Entra token
-When  the request is processed
-Then  the response lists the resources that would be started
-And   no ARM write operation is performed
+Given a resource group on profile weekday-0830-1730
+And   I tag it schedule-override-state=stopped, schedule-override-until=<today 17:30+07:00>
+When  the next cycle runs (within 15 minutes)
+Then  its resources are stopped
+And   they are not restarted by later cycles that day
+And   the schedule resumes normally the next working day
 
-Priority: Should
+Priority: Must
+```
+
+### US-07 Production is never touched
+
+```
+As the governance team,
+I want production subscriptions excluded without exception,
+So that the scheduler cannot cause a production outage.
+
+Given a VM tagged schedule-profile=weekday-0830-1730
+And   its subscription is tagged environment=prod
+When  any reconciliation cycle runs
+Then  no action is submitted
+And   a log record with reason "production-excluded" is written
+
+Priority: Must
 ```
 
 ## 15. Assumptions and Dependencies
@@ -494,6 +530,7 @@ Priority: Should
 | A-05 | Workload owners are responsible for tagging their resources with valid profiles. |
 | A-06 | Azure Policy for tag inheritance and allowed values will be delivered as a separate governance work item. |
 | A-07 | Outbound access from the Function App to Azure Resource Manager (`management.azure.com`) and Microsoft Entra ID is permitted (through the hub firewall if VNet-integrated). |
+| A-08 | All production subscriptions carry the tag `environment=prod`, enforced by Azure Policy. BR-003 depends on this. |
 
 ## 16. Risks
 
@@ -511,13 +548,26 @@ Priority: Should
 
 | ID | Issue | Owner | Status |
 |---|---|---|---|
-| OI-01 | ⚠️ GAP: Confirm the list of in-scope management groups and any subscriptions to exclude. | Platform Team | Open |
-| OI-02 | ⚠️ GAP: Confirm the standard schedule profiles (names, windows, timezones) and the holiday calendar source. | Platform Team / FinOps | Open |
-| OI-03 | ⚠️ GAP: Should on-demand start/stop set an automatic override (e.g. 4 hours), or only act once? | Platform Team | Open |
-| OI-04 | ⚠️ GAP: Are HA-enabled databases and SQL MI in scope for phase 1? | Workload Owners | Open |
-| OI-05 | ⚠️ GAP: Should the HTTP on-demand endpoint be reachable only privately (via hub) or publicly with Entra ID auth? | Security | Open |
-| OI-06 | ⚠️ GAP: Is a production opt-in (BR-003) needed in phase 1, or is prod fully excluded? | Governance | Open |
-| OI-07 | Decision: Python 3.11 is selected as the function runtime (testability, Azure SDK coverage). PowerShell 7.4 remains an alternative if the operations team prefers it. | Platform Team | Proposed |
+| OI-01 | In-scope management groups and excluded subscriptions. To be set in `terraform.tfvars` (`in_scope_management_group_ids`, `excluded_scope_ids`) before deployment. | Platform Team | Open – deployment-time configuration |
+| OI-02 | Standard schedule profile | Platform Team / FinOps | Closed – D-02 |
+| OI-03 | On-demand start/stop behaviour | Platform Team | Closed – D-03 (applies in phase 2) |
+| OI-04 | HA databases and SQL MI scope | Workload Owners | Closed – D-04 |
+| OI-05 | On-demand endpoint exposure | Security | Closed – D-05 (deferred to phase 2; exposure re-assessed then, FR-027) |
+| OI-06 | Production opt-in | Governance | Closed – D-06 |
+| OI-07 | Function runtime language | Platform Team | Proposed – Python 3.11 (PowerShell 7.4 alternative) |
+| OI-08 | ⚠️ GAP: Should resources stay stopped on public holidays? If yes, confirm the calendar (e.g. Thai public holidays) and who maintains `config/holidays/` each year. | FinOps / Platform Team | Open |
+| OI-09 | ⚠️ GAP: Azure SQL Database (provisioned) cannot be stopped. Choose: (a) convert non-prod databases to serverless with auto-pause, (b) build the `sqldb` scale-down handler, or (c) leave out of scope. | Workload Owners / FinOps | Open |
+
+### 17.1 Decision log
+
+| ID | Date | Decision |
+|---|---|---|
+| D-01 | 2026-10-03 | Option C selected: Azure Functions (Flex Consumption) deployed with Terraform CLI. |
+| D-02 | 2026-10-03 | Standard schedule: 08:30–17:30, Monday–Friday, `Asia/Bangkok`. Profile name `weekday-0830-1730`. |
+| D-03 | 2026-10-03 | On-demand start/stop sets an automatic 4-hour override. |
+| D-04 | 2026-10-03 | All database types with a stop operation are in scope, including HA servers and SQL MI. |
+| D-05 | 2026-10-03 | On-demand HTTP endpoint deferred to phase 2. Phase 1 uses override tags. |
+| D-06 | 2026-10-03 | No production opt-in; production subscriptions are always excluded. |
 
 ## 18. Glossary
 
@@ -531,3 +581,10 @@ Priority: Should
 | Resource Graph | Azure service for querying resources across subscriptions and management groups |
 | LRO | Long-running operation; an ARM request that completes asynchronously |
 | MG | Management group |
+
+## 19. Change History
+
+| Version | Date | Changes |
+|---|---|---|
+| 0.1 | 2026-10-03 | Initial draft |
+| 0.2 | 2026-10-03 | Incorporated decisions D-02 to D-06: standard Bangkok profile, override state tag, all databases in scope, on-demand endpoint deferred to phase 2, production hard-excluded. Added OI-08 (holidays) and OI-09 (Azure SQL Database). |
