@@ -1,0 +1,7 @@
+{
+  "timezone": "Asia/Bangkok",
+  "runWindows": [
+    { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:30", "stop": "17:30" }
+  ],
+  "startOffsetMinutesByOrder": { "1": -30, "2": -15, "3": 0 }
+}

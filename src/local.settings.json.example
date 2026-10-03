@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "RECONCILE_SCHEDULE": "0 */15 * * * *",
+    "APP_CONFIG_ENDPOINT": "https://appcs-pwrsched-dev.azconfig.io",
+    "AZURE_CLIENT_ID": "<user-assigned-managed-identity-client-id>"
+  }
+}

@@ -1,0 +1,40 @@
+subscription_id = "<management-subscription-id>"
+location        = "southeastasia"
+
+# Optional. Leave empty for the standard single tenant-wide deployment.
+# Set a short suffix only if you run more than one instance (e.g. "sea").
+name_suffix = ""
+
+# Assignable (parent) scope for the custom role definition — the intermediate/org MG.
+role_assignable_scope = "/providers/Microsoft.Management/managementGroups/<org>"
+
+# One scheduler for the whole tenant: include the non-production MGs it should manage.
+in_scope_management_group_ids = [
+  "/providers/Microsoft.Management/managementGroups/<org>-landingzones",
+  "/providers/Microsoft.Management/managementGroups/<org>-sandbox",
+]
+
+# Scopes always skipped. Production is ALSO hard-excluded in the engine
+# (subscriptions tagged environment=prod) regardless of this list (BR-003).
+excluded_scope_ids = [
+  "/providers/Microsoft.Management/managementGroups/<org>-platform",
+]
+
+enabled_resource_types = ["vm", "vmss", "aks", "postgres-flex", "mysql-flex", "sqlmi"]
+
+reconcile_schedule  = "0 */15 * * * *"
+dry_run             = true
+max_actions_per_run = 200
+
+log_analytics_workspace_id = ""
+alert_email_addresses      = ["cloud-platform@example.com"]
+
+enable_private_networking = false
+# integration_subnet_id   = "/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<snet>"
+
+tags = {
+  owner       = "cloud-platform"
+  cost-centre = "<cc>"
+  project     = "power-scheduler"
+  managed-by  = "terraform"
+}

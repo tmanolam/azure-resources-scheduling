@@ -2,7 +2,7 @@
 
 > Tag-driven start/stop scheduling for Azure resources (VM, VMSS, AKS, PostgreSQL/MySQL Flexible Server, SQL MI, Application Gateway), running as a timer-triggered Azure Function and deployed with Terraform.
 
-**Last updated:** 2026-10-03 (v0.3) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+**Last updated:** 2026-10-03 (v0.4 – single tenant-wide deployment) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) · **Verification:** [docs/VERIFICATION.md](docs/VERIFICATION.md)
 
 ## Table of Contents
 
@@ -19,6 +19,7 @@
   - [Step 6 – Verify in dry-run mode](#step-6--verify-in-dry-run-mode)
   - [Step 7 – Go live](#step-7--go-live)
 - [Configuration Reference](#configuration-reference)
+- [Multiple Tenants](#multiple-tenants)
 - [Day-2 Operations](#day-2-operations)
 - [Rollback and Removal](#rollback-and-removal)
 - [Troubleshooting](#troubleshooting)
@@ -33,13 +34,13 @@ For an environment whose state backend already exists (see Step 2 for first-time
 az login --tenant <tenant-id>
 export ARM_SUBSCRIPTION_ID=<management-subscription-id>
 
-cd infra/envs/dev
+cd infra/scheduler
 terraform init -backend-config=backend.hcl
 terraform plan -out tfplan
 terraform apply tfplan
 
-cd ../../../src
-func azure functionapp publish "$(terraform -chdir=../infra/envs/dev output -raw function_app_name)" --python
+cd ../../src
+func azure functionapp publish "$(terraform -chdir=../infra/scheduler output -raw function_app_name)" --python
 ```
 
 The scheduler starts in **dry-run mode**. It logs what it would do but changes nothing until you set `dry_run = false` ([Step 7](#step-7--go-live)).
@@ -54,17 +55,20 @@ The scheduler starts in **dry-run mode**. It logs what it would do but changes n
 6. Every decision is logged to **Application Insights / Log Analytics**.
 
 ```
-Management subscription
-└── rg-pwrsched-<env>-<region>
-    ├── func-pwrsched-<env>       (Flex Consumption, Python 3.11)
-    ├── st<pwrsched><env>         (runtime storage, deployment package)
-    ├── id-pwrsched-<env>         (user-assigned managed identity)
-    ├── appcs-pwrsched-<env>      (App Configuration: profiles, scopes, settings)
-    ├── appi-pwrsched-<env>       (Application Insights → Log Analytics)
-    └── ag-pwrsched-<env>         (alert action group)
+Management subscription (one scheduler for the whole tenant)
+└── rg-pwrsched-<region>
+    ├── func-pwrsched            (Flex Consumption, Python 3.11)
+    ├── stpwrsched               (runtime storage, deployment package)
+    ├── id-pwrsched              (user-assigned managed identity)
+    ├── appcs-pwrsched           (App Configuration: profiles, scopes, settings)
+    ├── appi-pwrsched            (Application Insights → Log Analytics)
+    └── ag-pwrsched              (alert action group)
 
-Custom role "Resource Power Operator" → assigned to id-pwrsched-<env>
+Custom role "Resource Power Operator" → assigned to id-pwrsched
 at the in-scope management groups (e.g. Landing Zones, Sandbox).
+
+Names take an optional `name_suffix` (e.g. func-pwrsched-sea) only if you run
+more than one instance; it is empty by default.
 ```
 
 ## Repository Layout
@@ -80,15 +84,13 @@ azure-power-scheduler/
 │       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok
 │       └── sandbox-default.json
 ├── infra/
-│   ├── envs/
-│   │   ├── dev/
-│   │   │   ├── backend.hcl.example
-│   │   │   ├── main.tf
-│   │   │   ├── providers.tf
-│   │   │   ├── variables.tf
-│   │   │   ├── outputs.tf
-│   │   │   └── terraform.tfvars.example
-│   │   └── prod/
+│   ├── scheduler/                  # single tenant-wide root module
+│   │   ├── backend.hcl.example
+│   │   ├── main.tf
+│   │   ├── providers.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── terraform.tfvars.example
 │   └── modules/
 │       ├── function_app/           # plan, function app, storage, identity, networking
 │       ├── rbac/                   # custom role definition + MG assignments
@@ -183,10 +185,10 @@ echo "State storage account: $STATE_SA"
 
 **If container creation fails with `AuthorizationPermissionMismatch`:** wait 1–2 minutes for the role assignment to propagate, then retry.
 
-### Step 3 – Configure the environment
+### Step 3 – Configure the deployment
 
 ```bash
-cd infra/envs/dev
+cd infra/scheduler
 cp backend.hcl.example backend.hcl
 cp terraform.tfvars.example terraform.tfvars
 ```
@@ -197,7 +199,7 @@ Edit **`backend.hcl`**:
 resource_group_name  = "rg-tfstate-mgmt"
 storage_account_name = "<state-storage-account-name>"
 container_name       = "tfstate"
-key                  = "pwrsched/dev.tfstate"
+key                  = "pwrsched/terraform.tfstate"
 use_azuread_auth     = true
 ```
 
@@ -206,7 +208,13 @@ Edit **`terraform.tfvars`**:
 ```hcl
 subscription_id = "<management-subscription-id>"
 location        = "<region>"
-environment     = "dev"
+
+# Optional. Leave empty for the standard single tenant-wide deployment;
+# set a short suffix only if you run more than one instance (e.g. "sea").
+name_suffix = ""
+
+# Parent (assignable) scope for the custom role definition.
+role_assignable_scope = "/providers/Microsoft.Management/managementGroups/<org>"
 
 in_scope_management_group_ids = [
   "/providers/Microsoft.Management/managementGroups/<org>-landingzones",
@@ -230,7 +238,6 @@ enable_private_networking = false
 # integration_subnet_id   = "/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<snet>"
 
 tags = {
-  environment = "dev"
   owner       = "cloud-platform"
   cost-centre = "<cc>"
   project     = "power-scheduler"
@@ -244,11 +251,11 @@ Review the schedule profiles in `config/profiles/` before deploying (see [Config
 
 ### Step 4 – Deploy infrastructure with Terraform
 
-Run from `infra/envs/dev`:
+Run from `infra/scheduler`:
 
 ```bash
 terraform init -backend-config=backend.hcl
-terraform fmt -check -recursive ../../
+terraform fmt -check -recursive ../
 terraform validate
 terraform plan -out tfplan
 ```
@@ -273,11 +280,11 @@ terraform output
 **Expected output:** `Apply complete!`, followed by outputs similar to:
 
 ```
-function_app_name            = "func-pwrsched-dev"
-resource_group_name          = "rg-pwrsched-dev-<region>"
-app_configuration_endpoint   = "https://appcs-pwrsched-dev.azconfig.io"
+function_app_name            = "func-pwrsched"
+resource_group_name          = "rg-pwrsched-<region>"
+app_configuration_endpoint   = "https://appcs-pwrsched.azconfig.io"
 managed_identity_principal_id = "<guid>"
-application_insights_name    = "appi-pwrsched-dev"
+application_insights_name    = "appi-pwrsched"
 ```
 
 ### Step 5 – Deploy the function code
@@ -285,8 +292,8 @@ application_insights_name    = "appi-pwrsched-dev"
 Terraform creates the empty Function App. Publish the code with Azure Functions Core Tools. It runs a remote build that installs `requirements.txt` on Azure.
 
 ```bash
-cd ../../../src
-FUNC_APP=$(terraform -chdir=../infra/envs/dev output -raw function_app_name)
+cd ../../src
+FUNC_APP=$(terraform -chdir=../infra/scheduler output -raw function_app_name)
 
 func azure functionapp publish "$FUNC_APP" --python
 ```
@@ -294,7 +301,7 @@ func azure functionapp publish "$FUNC_APP" --python
 Alternatively, deploy a zip with the Azure CLI:
 
 ```bash
-RG=$(terraform -chdir=../infra/envs/dev output -raw resource_group_name)
+RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
 zip -r ../function.zip . -x "*.pyc" "__pycache__/*" ".venv/*" "local.settings.json"
 az functionapp deployment source config-zip \
   --resource-group "$RG" --name "$FUNC_APP" --src ../function.zip --build-remote true
@@ -303,7 +310,7 @@ az functionapp deployment source config-zip \
 **Expected output:** the publish log ends with the list of functions:
 
 ```
-Functions in func-pwrsched-dev:
+Functions in func-pwrsched:
     reconcile - [timerTrigger]
 ```
 
@@ -314,8 +321,8 @@ Re-run this step whenever the code in `src/` changes. Configuration changes do *
 Wait for the next 15-minute tick, then query the logs. Use the **Logs** blade of the Application Insights resource, or the CLI (installs the `application-insights` extension on first use):
 
 ```bash
-APPI=$(terraform -chdir=../infra/envs/dev output -raw application_insights_name)
-RG=$(terraform -chdir=../infra/envs/dev output -raw resource_group_name)
+APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
+RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
 
 az monitor app-insights query --app "$APPI" --resource-group "$RG" --analytics-query '
 traces
@@ -345,13 +352,53 @@ Check that:
 After at least one full business day of correct dry-run results:
 
 ```bash
-cd infra/envs/dev
+cd infra/scheduler
 # set dry_run = false in terraform.tfvars
 terraform plan -out tfplan    # should change only the App Configuration key pwrsched:dryRun
 terraform apply tfplan
 ```
 
 The change takes effect on the next cycle. Watch the first live cycles in the logs and in the Activity Log.
+
+## Multiple Tenants
+
+Deploy **one scheduler per tenant**. The Terraform code (`infra/scheduler` + `infra/modules`) and the Function code are identical for every tenant — only the configuration and the Terraform state differ. Do **not** use a git branch per tenant; keep one `main` branch and distinguish tenants by config files.
+
+Per-tenant files live in `infra/tenants/` (copy the committed `.example` templates; the real files are gitignored):
+
+```bash
+cd infra/tenants
+cp example.tfvars.example       contoso.tfvars
+cp example.backend.hcl.example  contoso.backend.hcl
+# edit both for the Contoso tenant (subscription, scopes, state storage account)
+```
+
+Each tenant keeps an **isolated state file** in a state storage account inside that tenant's own management subscription, so tenants never share state or access each other.
+
+Sign in to the **target tenant**, then deploy with the wrapper:
+
+```bash
+az login --tenant <contoso-tenant-id>
+export ARM_SUBSCRIPTION_ID=<contoso-management-subscription-id>
+export ARM_TENANT_ID=<contoso-tenant-id>
+
+./infra/deploy.sh contoso plan
+./infra/deploy.sh contoso apply
+```
+
+`deploy.sh <tenant> <command>` runs `terraform -chdir=infra/scheduler` with that tenant's `-backend-config` and `-var-file` (`init` uses `-reconfigure` to switch backends cleanly between tenants). Commands: `init`, `plan`, `apply`, `output`, `destroy`.
+
+Then publish the function code to that tenant's app:
+
+```bash
+cd src
+FUNC_APP=$(terraform -chdir=../infra/scheduler output -raw function_app_name)
+func azure functionapp publish "$FUNC_APP" --python
+```
+
+> 📝 Note: Production is hard-excluded in **every** tenant (subscriptions tagged `environment=prod`), regardless of configuration.
+
+> ⚠️ Warning: Always confirm you are logged in to the correct tenant before `apply`. `deploy.sh` re-initialises the backend for the named tenant, but it cannot verify your Azure CLI session points at the same tenant.
 
 ## Configuration Reference
 
@@ -391,7 +438,8 @@ The file name (without `.json`) is the profile name used in the `schedule-profil
 |---|---|---|---|
 | `subscription_id` | Management subscription for the scheduler | – | ✓ |
 | `location` | Azure region | – | ✓ |
-| `environment` | `dev` / `prod` | – | ✓ |
+| `name_suffix` | Optional short suffix for resource names; empty for the single tenant-wide instance | `""` | |
+| `role_assignable_scope` | Parent (intermediate/org) MG that is the assignable scope for the custom role | – | ✓ |
 | `in_scope_management_group_ids` | MGs to query and assign the custom role at | – | ✓ |
 | `excluded_scope_ids` | MG/subscription/RG IDs always skipped | `[]` | |
 | `enabled_resource_types` | Handler keys to enable | `["vm"]` | |
@@ -407,13 +455,13 @@ The file name (without `.json`) is the profile name used in the `schedule-profil
 
 ## Day-2 Operations
 
-All configuration changes follow the same pattern: edit files, then `terraform plan` and `terraform apply` from `infra/envs/<env>`. No code redeploy is needed.
+All configuration changes follow the same pattern: edit files, then `terraform plan` and `terraform apply` from `infra/scheduler`. No code redeploy is needed.
 
 ### Change a schedule
 
 ```bash
 vi config/profiles/weekday-0830-1730.json     # e.g. change "stop" to "17:00"
-cd infra/envs/dev && terraform plan -out tfplan && terraform apply tfplan
+cd infra/scheduler && terraform plan -out tfplan && terraform apply tfplan
 ```
 
 ### Add a new profile
@@ -478,7 +526,7 @@ az tag update --operation Merge --resource-id "<resource-id>" --tags schedule-en
 | Unexpected actions — stop acting immediately | Set `dry_run = true` and apply. This takes effect on the next cycle. For an instant stop: `az functionapp config appsettings set -g "$RG" -n "$FUNC_APP" --settings AzureWebJobs.reconcile.Disabled=true`, then set `scheduler_enabled = false` in tfvars and apply so Terraform matches. |
 | Bad code release | Re-publish the previous code version (Step 5) from the previous Git tag. |
 | Bad configuration | `git revert` the change in `config/` or `terraform.tfvars`, then plan and apply. |
-| Remove the solution | `terraform destroy` from `infra/envs/<env>`. This removes the Function App, configuration, custom role and its assignments. Resources stay in whatever power state they were in; start any that need to be running. Tags on workload resources are not removed. |
+| Remove the solution | `terraform destroy` from `infra/scheduler`. This removes the Function App, configuration, custom role and its assignments. Resources stay in whatever power state they were in; start any that need to be running. Tags on workload resources are not removed. |
 
 ## Troubleshooting
 

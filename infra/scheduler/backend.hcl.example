@@ -1,0 +1,5 @@
+resource_group_name  = "rg-tfstate-mgmt"
+storage_account_name = "<state-storage-account-name>"
+container_name       = "tfstate"
+key                  = "pwrsched/terraform.tfstate"
+use_azuread_auth     = true

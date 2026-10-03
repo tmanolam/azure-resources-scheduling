@@ -1,0 +1,48 @@
+# Per-tenant variables template.
+#
+# Copy to <tenant>.tfvars (e.g. contoso.tfvars) and fill in. Real per-tenant
+# .tfvars files are gitignored; only this .example is committed.
+#
+# One scheduler per tenant. The code is identical across tenants; only this
+# file and the matching <tenant>.backend.hcl differ.
+
+subscription_id = "<management-subscription-id-in-THIS-tenant>"
+location        = "southeastasia"
+
+# Optional. Leave empty for the standard single deployment in this tenant.
+# Only set if you run more than one instance in the same tenant (rare).
+name_suffix = ""
+
+# Parent (assignable) scope for the custom role definition in this tenant.
+role_assignable_scope = "/providers/Microsoft.Management/managementGroups/<org>"
+
+# The non-production MGs this tenant's scheduler should manage.
+in_scope_management_group_ids = [
+  "/providers/Microsoft.Management/managementGroups/<org>-landingzones",
+  "/providers/Microsoft.Management/managementGroups/<org>-sandbox",
+]
+
+# Scopes always skipped. Production is ADDITIONALLY hard-excluded in the engine
+# (subscriptions tagged environment=prod) regardless of this list (BR-003).
+excluded_scope_ids = [
+  "/providers/Microsoft.Management/managementGroups/<org>-platform",
+]
+
+enabled_resource_types = ["vm", "vmss", "aks", "postgres-flex", "mysql-flex", "sqlmi"]
+
+reconcile_schedule  = "0 */15 * * * *"
+dry_run             = true
+max_actions_per_run = 200
+
+log_analytics_workspace_id = ""
+alert_email_addresses      = ["cloud-platform@example.com"]
+
+enable_private_networking = false
+# integration_subnet_id   = "/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<snet>"
+
+tags = {
+  owner       = "cloud-platform"
+  cost-centre = "<cc>"
+  project     = "power-scheduler"
+  managed-by  = "terraform"
+}

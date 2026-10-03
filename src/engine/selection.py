@@ -1,0 +1,170 @@
+"""Resource selection and filtering (T-202).
+
+Takes discovered ResourceRecords and decides which are eligible for scheduling,
+resolving tags and applying the hard safety rules:
+
+- FR-013  Tag precedence: resource > resource group > subscription.
+- FR-011  Resources under any exclude scope are always skipped.
+- FR-012  Only enabled resource types are processed.
+- FR-021  schedule-enabled=false opts a resource out.
+- BR-002  Opt-in only: a resource must resolve a schedule-profile tag.
+- BR-003  Production hard-exclusion: subscription tagged environment=prod is
+          always skipped with reason 'production-excluded'. No opt-in exists.
+
+The output is a list of SelectionResult, each either eligible (with the resolved
+profile name, order and override tags) or skipped (with a reason), so every
+resource produces a log record (OBS-001).
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Mapping, Optional, Sequence
+
+from .models import ResourceRecord
+
+__all__ = [
+    "SelectionResult",
+    "select_resources",
+    "resolve_effective_tags",
+]
+
+logger = logging.getLogger("pwrsched.selection")
+
+# Tag keys (§6.1).
+TAG_PROFILE = "schedule-profile"
+TAG_ENABLED = "schedule-enabled"
+TAG_OVERRIDE_STATE = "schedule-override-state"
+TAG_OVERRIDE_UNTIL = "schedule-override-until"
+TAG_ORDER = "schedule-order"
+
+# Production marker (BR-003, A-08).
+ENV_TAG = "environment"
+PROD_ENV_VALUE = "prod"
+
+
+@dataclass(frozen=True)
+class SelectionResult:
+    """Outcome of evaluating one resource for eligibility."""
+
+    resource: ResourceRecord
+    eligible: bool
+    reason: str
+    profile_name: Optional[str] = None
+    order: Optional[int] = None
+    override_state: Optional[str] = None
+    override_until: Optional[str] = None
+
+
+def resolve_effective_tags(resource: ResourceRecord) -> dict[str, str]:
+    """Merge tags with precedence resource > resource group > subscription (FR-013)."""
+    merged: dict[str, str] = {}
+    merged.update(resource.subscription_tags or {})
+    merged.update(resource.resource_group_tags or {})
+    merged.update(resource.tags or {})
+    return merged
+
+
+def _is_under_excluded_scope(resource: ResourceRecord, exclude_scopes: Sequence[str]) -> Optional[str]:
+    """Return the matching exclude scope if the resource is under one, else None.
+
+    Matches subscription, resource-group and resource ID scopes by
+    case-insensitive comparison. A scope matches when it equals, or is a path
+    prefix of, the resource ID; the subscription scope ``/subscriptions/<id>``
+    also matches via the resource's subscription ID.
+
+    Management-group exclude scopes cannot be resolved to resources here without
+    MG-membership data, so they are enforced upstream by simply not including
+    that MG in the Resource Graph query (FR-011).
+    """
+    rid = resource.resource_id.lower()
+    sub_scope = f"/subscriptions/{resource.subscription_id.lower()}"
+    for scope in exclude_scopes:
+        s = scope.lower().rstrip("/")
+        if not s:
+            continue
+        if s.startswith("/subscriptions/"):
+            if rid == s or rid.startswith(s + "/") or s == sub_scope:
+                return scope
+    return None
+
+
+def _parse_order(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if 1 <= n <= 9:
+        return n
+    return None
+
+
+def select_resources(
+    resources: Sequence[ResourceRecord],
+    *,
+    enabled_handler_keys: Sequence[str],
+    exclude_scopes: Sequence[str] = (),
+    default_order_by_handler: Optional[Mapping[str, int]] = None,
+) -> list[SelectionResult]:
+    """Filter and resolve resources for scheduling.
+
+    Order of checks matters: safety exclusions (production, excluded scope,
+    disabled type) are applied before opt-in resolution so a production resource
+    is never treated as eligible regardless of its tags (BR-003).
+    """
+    enabled = set(enabled_handler_keys)
+    defaults = dict(default_order_by_handler or {})
+    results: list[SelectionResult] = []
+
+    for r in resources:
+        effective = resolve_effective_tags(r)
+
+        # BR-003: production hard-exclusion (checked on subscription tags only,
+        # which cannot be overridden by resource/RG tags).
+        if (r.subscription_tags or {}).get(ENV_TAG, "").strip().lower() == PROD_ENV_VALUE:
+            results.append(SelectionResult(r, False, "production-excluded"))
+            continue
+
+        # FR-011: excluded scope.
+        matched = _is_under_excluded_scope(r, exclude_scopes)
+        if matched is not None:
+            results.append(SelectionResult(r, False, "excluded-scope"))
+            continue
+
+        # FR-012: disabled resource type.
+        if r.handler_key not in enabled:
+            results.append(SelectionResult(r, False, "type-not-enabled"))
+            continue
+
+        # FR-021: explicit opt-out.
+        if effective.get(TAG_ENABLED, "").strip().lower() == "false":
+            results.append(SelectionResult(r, False, "schedule-disabled"))
+            continue
+
+        # BR-002: opt-in only.
+        profile_name = effective.get(TAG_PROFILE, "").strip()
+        if not profile_name:
+            results.append(SelectionResult(r, False, "no-profile"))
+            continue
+
+        order = _parse_order(effective.get(TAG_ORDER)) or defaults.get(r.handler_key, 3)
+        results.append(
+            SelectionResult(
+                resource=r,
+                eligible=True,
+                reason="eligible",
+                profile_name=profile_name,
+                order=order,
+                override_state=effective.get(TAG_OVERRIDE_STATE),
+                override_until=effective.get(TAG_OVERRIDE_UNTIL),
+            )
+        )
+
+    eligible_count = sum(1 for x in results if x.eligible)
+    logger.info(
+        "pwrsched.selection: %d eligible of %d resources", eligible_count, len(results)
+    )
+    return results

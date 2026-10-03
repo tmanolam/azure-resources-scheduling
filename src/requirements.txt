@@ -1,0 +1,23 @@
+# Azure Functions Python worker (v2 programming model)
+azure-functions==1.21.3
+
+# Authentication via user-assigned managed identity (no secrets) — SEC-001
+azure-identity==1.19.0
+
+# Configuration source — App Configuration (§6)
+azure-appconfiguration==1.7.1
+
+# Resource discovery — Azure Resource Graph (FR-010, FR-014)
+azure-mgmt-resourcegraph==8.0.0
+
+# ARM clients for resource handlers (§8)
+azure-mgmt-compute==33.0.0
+azure-mgmt-containerservice==34.0.0
+azure-mgmt-rdbms==10.1.0
+azure-mgmt-sql==3.0.1
+azure-mgmt-network==28.0.0
+azure-mgmt-resource==23.1.1
+azure-core==1.32.0
+
+# IANA timezone database for zoneinfo on the Linux Functions runtime (FR-002)
+tzdata==2024.2

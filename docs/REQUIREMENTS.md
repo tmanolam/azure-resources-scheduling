@@ -3,7 +3,7 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.3 (Stakeholder decisions incorporated) |
+| Version | 0.4 (Single tenant-wide deployment) |
 | Last updated | 2026-10-03 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
@@ -113,7 +113,7 @@ Tenant Root Group
 
 | Component | Purpose |
 |---|---|
-| Resource group `rg-pwrsched-<env>-<region>` | Holds all scheduler resources (Management subscription) |
+| Resource group `rg-pwrsched-<region>` | Holds all scheduler resources (Management subscription) |
 | Function App (Flex Consumption, Linux, Python 3.11) | Hosts the timer-triggered reconciliation function (an HTTP on-demand function is added in phase 2) |
 | Storage account | Functions runtime storage (`AzureWebJobsStorage`), deployment package container, timer lease |
 | User-assigned managed identity | Identity used for Azure Resource Manager (ARM), Resource Graph, App Configuration and Storage access |
@@ -317,7 +317,7 @@ Source      : FinOps
 | NFR-007 | Extensibility | New resource types shall be addable as a handler module plus a role-permission update. |
 | NFR-008 | Cost | Run cost of the scheduler shall stay under USD 50/month (excluding a shared Log Analytics workspace). |
 | NFR-009 | Testability | Desired-state evaluation shall be a pure function covered by unit tests (timezones, midnight crossing, overrides). |
-| NFR-010 | Portability | All infrastructure shall be reproducible from Terraform in a new environment (e.g. dev and prod scheduler instances). |
+| NFR-010 | Portability | All infrastructure shall be reproducible from Terraform in a new tenant. One scheduler instance is deployed per tenant; an optional `name_suffix` allows a second instance where genuinely needed. |
 
 ## 11. Security Requirements
 
@@ -380,10 +380,10 @@ Microsoft.Network/applicationGateways/stop/action
 |---|---|
 | IAC-001 | All Azure resources, the role definition, role assignments and App Configuration keys shall be defined in Terraform. |
 | IAC-002 | Terraform state shall be stored remotely in an Azure Storage backend with Entra ID authentication (`use_azuread_auth = true`) and state locking. |
-| IAC-003 | The code shall be organised as a root module per environment plus reusable modules: `function_app`, `rbac`, `app_config`, `monitoring`. |
+| IAC-003 | The code shall be organised as a single tenant-wide root module (`infra/scheduler`) plus reusable modules: `function_app`, `rbac`, `app_config`, `monitoring`. One scheduler manages the whole tenant's in-scope (non-production) estate. |
 | IAC-004 | Schedule profiles and global settings shall be maintained in versioned files (`config/profiles/*.json`, `config/settings.json`) and loaded into App Configuration by Terraform. |
 | IAC-005 | Provider versions shall be pinned (`azurerm ~> 4.x`, `azuread ~> 3.x`, Terraform `>= 1.9`). |
-| IAC-006 | All resources shall carry standard tags: `environment`, `owner`, `cost-centre`, `project`, `managed-by=terraform`. |
+| IAC-006 | All scheduler resources shall carry standard tags: `owner`, `cost-centre`, `project`, `managed-by=terraform`. (The `environment=prod` tag on *workload* subscriptions drives the production hard-exclusion, BR-003, and is separate from these.) |
 | IAC-007 | Function code shall be packaged as a zip and deployed after infrastructure creation using the documented CLI command (see README). |
 | IAC-008 | `terraform plan` shall show no changes after a successful apply (no drift-by-design), except for App Configuration keys changed intentionally. |
 
@@ -393,7 +393,8 @@ Microsoft.Network/applicationGateways/stop/action
 |---|---|---|
 | `subscription_id` | string | Management subscription hosting the scheduler |
 | `location` | string | Azure region |
-| `environment` | string | `dev` / `prod` |
+| `name_suffix` | string | Optional short suffix for resource names; empty for the single tenant-wide instance |
+| `role_assignable_scope` | string | Parent (intermediate/org) MG that is the assignable scope for the custom role |
 | `in_scope_management_group_ids` | list(string) | MGs where the custom role is assigned and resources are queried |
 | `excluded_scope_ids` | list(string) | MG/subscription/RG IDs always excluded |
 | `enabled_resource_types` | list(string) | Handler keys to enable |
@@ -591,3 +592,4 @@ Priority: Must
 | 0.1 | 2026-10-03 | Initial draft |
 | 0.2 | 2026-10-03 | Incorporated decisions D-02 to D-06: standard Bangkok profile, override state tag, all databases in scope, on-demand endpoint deferred to phase 2, production hard-excluded. Added OI-08 (holidays) and OI-09 (Azure SQL Database). |
 | 0.3 | 2026-10-03 | Decisions D-07 (holidays to phase 2, FR-028) and D-08 (Azure SQL Database out of scope). Removed holiday fields from the phase 1 profile schema. Added risk R-08. |
+| 0.4 | 2026-10-03 | Single tenant-wide deployment: one scheduler per tenant (`infra/scheduler`) with an optional `name_suffix`, replacing per-environment (dev/prod) roots. Updated IAC-003, IAC-006, NFR-010, §5.2 and §13.1 (`environment` → `name_suffix` + `role_assignable_scope`). Production remains hard-excluded (BR-003). |

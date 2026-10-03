@@ -1,0 +1,30 @@
+# Kiro / MCP (contains secrets, e.g. GitHub PAT)
+.kiro/settings/mcp.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+tfplan
+backend.hcl
+terraform.tfvars
+
+# Per-tenant config (real files are secret-ish; keep only the .example templates)
+infra/tenants/*.tfvars
+infra/tenants/*.backend.hcl
+!infra/tenants/*.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Azure Functions
+local.settings.json
+function.zip
+
+# OS
+.DS_Store

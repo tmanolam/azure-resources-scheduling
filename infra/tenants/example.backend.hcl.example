@@ -1,0 +1,14 @@
+# Per-tenant Terraform state backend template.
+#
+# Copy to <tenant>.backend.hcl (e.g. contoso.backend.hcl) and fill in. Real
+# per-tenant .backend.hcl files are gitignored; only this .example is committed.
+#
+# Each tenant has an ISOLATED state file, ideally in a state storage account
+# that lives inside that same tenant's management subscription. This keeps
+# tenants fully separated — no cross-tenant access.
+
+resource_group_name  = "rg-tfstate-mgmt"
+storage_account_name = "<state-storage-account-name-in-THIS-tenant>"
+container_name       = "tfstate"
+key                  = "pwrsched/<tenant>.tfstate"
+use_azuread_auth     = true
