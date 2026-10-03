@@ -3,11 +3,11 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.2 (Stakeholder decisions incorporated) |
+| Version | 0.3 (Stakeholder decisions incorporated) |
 | Last updated | 2026-10-03 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | Draft – open issues OI-01, OI-08, OI-09 remain |
+| Status | Draft – only OI-01 (deployment-time configuration) remains open |
 
 ## Table of Contents
 
@@ -62,7 +62,7 @@ The scheduler is flexible in three ways:
 - Scheduled start/stop (power management) of the resource types listed in [Section 8](#8-resource-type-handler-requirements).
 - Scope selection at management group, subscription and resource group level, with include and exclude lists.
 - Tag-based opt-in, opt-out and temporary override (keep running or keep stopped) per resource, resource group or subscription.
-- Named, timezone-aware schedule profiles, including weekdays, run windows and holiday calendars.
+- Named, timezone-aware schedule profiles with weekdays and run windows.
 - Dry-run mode (evaluate and log only, no changes).
 - Logging, alerting and reporting.
 - Terraform code for all infrastructure, identity, RBAC and configuration.
@@ -78,7 +78,8 @@ The scheduler is flexible in three ways:
 - **On-demand HTTP endpoint** (`POST /api/run`): deferred to phase 2 (decision D-05). In phase 1, ad-hoc needs are handled with override tags (FR-025).
 - Production workloads: always excluded, with no opt-in (decision D-06, BR-003).
 - Azure Cosmos DB: has no stop/pause operation.
-- Azure SQL Database scale-down scheduling: pending decision OI-09.
+- **Public holiday calendars**: deferred to phase 2 (decision D-07). In phase 1, resources follow the normal weekday schedule on public holidays; owners can use a `stopped` override if needed.
+- **Azure SQL Database** (all tiers, including serverless): out of scope (decision D-08).
 
 ## 4. Stakeholder Register
 
@@ -129,7 +130,7 @@ flowchart TD
     A --> B[Load profiles and scopes from App Configuration]
     B --> C[Query Azure Resource Graph at included scopes]
     C --> D[Filter: exclusions, enabled tag, resource types]
-    D --> E[Evaluate desired state per resource<br/>profile + timezone + holidays + override]
+    D --> E[Evaluate desired state per resource<br/>profile + timezone + override]
     E --> F[Read actual power state]
     F --> G{desired != actual?}
     G -- No --> L[Log: no action]
@@ -164,8 +165,6 @@ Profiles are stored as JSON values under the key prefix `pwrsched:profiles:<name
   "runWindows": [
     { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:30", "stop": "17:30" }
   ],
-  "holidayCalendar": "public-2026",
-  "stopOnHolidays": true,
   "startOffsetMinutesByOrder": { "1": -30, "2": -15, "3": 0 }
 }
 ```
@@ -177,7 +176,7 @@ Rules for profile values:
 - A window where `stop` is earlier than `start` crosses midnight (for example 20:00–02:00).
 - `startOffsetMinutesByOrder` lets dependencies such as databases start earlier than the apps that use them. With the standard profile, databases (order 1) start at 08:00, AKS and Application Gateway (order 2) at 08:15, and VMs (order 3) at 08:30. Each step aligns with a 15-minute cycle.
 - `Asia/Bangkok` is UTC+7 with no daylight saving time.
-- Whether `stopOnHolidays` is used, and the holiday calendar source, is open (OI-08).
+- Holiday calendars (`holidayCalendar`, `stopOnHolidays` fields) are added in phase 2 (FR-028).
 
 ### 6.3 Global settings (App Configuration)
 
@@ -188,7 +187,6 @@ Rules for profile values:
 | `pwrsched:resourceTypes` | `["vm","vmss","aks","postgres-flex","mysql-flex","sqlmi","appgw"]` | Enabled resource type handlers |
 | `pwrsched:dryRun` | `true` | Global dry-run switch |
 | `pwrsched:maxActionsPerRun` | `200` | Safety cap |
-| `pwrsched:holidays:<calendar>` | `["2026-12-31","2027-01-01"]` | Holiday dates |
 
 ## 7. Functional Requirements
 
@@ -200,7 +198,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 |---|---|---|
 | FR-001 | The system shall run a reconciliation cycle on a timer, by default every 15 minutes. The interval shall be configurable through a Terraform variable (NCRONTAB expression in an app setting). | M |
 | FR-002 | The system shall evaluate time in each profile's own IANA timezone, independently of the Function App timezone (UTC). | M |
-| FR-003 | The system shall determine the desired state (`Running` or `Stopped`) of each resource from its profile, run windows, holiday calendar and override tag. | M |
+| FR-003 | The system shall determine the desired state (`Running` or `Stopped`) of each resource from its profile, run windows and override tags. | M |
 | FR-004 | The system shall act only when the desired state differs from the actual state (idempotent reconciliation). | M |
 | FR-005 | The system shall submit start/stop operations asynchronously (no wait for completion) and verify the outcome in the next cycle. | M |
 | FR-006 | The system shall honour start ordering (ascending `schedule-order`) and stop ordering (descending), including per-order start offsets from the profile. | S |
@@ -225,7 +223,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | FR-025 | Phase 1 ad-hoc operations: an operator sets `schedule-override-state` and `schedule-override-until` on a resource, resource group or subscription. The next cycle (≤ 15 min) applies the override state. No separate manual start/stop is required. | M |
 | FR-026 | The system shall log a warning for override tags with an invalid date or state, and ignore them. | M |
 
-**Phase 2 backlog (Won't in phase 1, decision D-05):**
+**Phase 2 backlog (Won't in phase 1, decisions D-05 and D-07):**
 
 | ID | Requirement | Priority |
 |---|---|---|
@@ -233,6 +231,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | FR-023 | The HTTP endpoint shall require Microsoft Entra ID authentication and authorise callers by app role (`PowerScheduler.Operator`). | W |
 | FR-024 | An on-demand `start` or `stop` shall set `schedule-override-state` to the requested state and `schedule-override-until` to now + 4 hours on the targeted resources (decision D-03). Requires `Microsoft.Resources/tags/write` for the managed identity. | W |
 | FR-027 | Network exposure of the endpoint (private via hub, or public with Entra ID) shall be decided before phase 2 build. | W |
+| FR-028 | Profiles shall support a public holiday calendar (`holidayCalendar`, `stopOnHolidays`), stored in `config/holidays/` and maintained yearly; resources stay stopped on listed dates (decision D-07). | W |
 
 ### 7.4 Safety
 
@@ -257,7 +256,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | `sqlmi` | `Microsoft.Sql/managedInstances` | Start | Stop | 1 | M |
 | `appgw` | `Microsoft.Network/applicationGateways` | Start | Stop | 2 | C |
 | `synapse-pool` | `Microsoft.Synapse/workspaces/sqlPools` | Resume | Pause | 1 | C |
-| `sqldb` | `Microsoft.Sql/servers/databases` | Scale up to tagged SKU | Scale down to tagged SKU | 1 | W (pending OI-09) |
+| `sqldb` | `Microsoft.Sql/servers/databases` | – | – | – | Out of scope (D-08) |
 | `appservice` | `Microsoft.Web/serverfarms` | Scale up | Scale down | 3 | W |
 
 ### 8.2 Handler-specific requirements
@@ -269,7 +268,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | HR-003 | PostgreSQL/MySQL Flexible: the platform auto-starts servers after 7 days stopped. The reconciliation shall re-stop them when the desired state is `Stopped`. |
 | HR-004 | All database types with a stop operation are in scope, including high-availability servers and servers with read replicas (decision D-04). Where the platform rejects a stop or start because of HA or replica configuration, the handler shall log the reason, skip the resource, and not retry it until its configuration changes. Behaviour is validated during the pilot. |
 | HR-005 | Each handler shall be a separate module implementing a common interface (`get_state`, `start`, `stop`) so new types can be added without changing the core engine. |
-| HR-006 | Azure SQL Database has no stop operation. Serverless databases with auto-pause need no scheduler action and shall be logged as `not-applicable`. Provisioned databases are handled only if the `sqldb` handler is approved (OI-09). |
+| HR-006 | Azure SQL Database is out of scope (decision D-08). No handler is built; the type is not queried, so tagging these databases has no effect. |
 
 ## 9. Business Rules
 
@@ -317,7 +316,7 @@ Source      : FinOps
 | NFR-006 | Maintainability | New schedules or scopes shall require configuration changes only (Terraform `apply`), not code changes. |
 | NFR-007 | Extensibility | New resource types shall be addable as a handler module plus a role-permission update. |
 | NFR-008 | Cost | Run cost of the scheduler shall stay under USD 50/month (excluding a shared Log Analytics workspace). |
-| NFR-009 | Testability | Desired-state evaluation shall be a pure function covered by unit tests (timezones, midnight crossing, holidays, overrides). |
+| NFR-009 | Testability | Desired-state evaluation shall be a pure function covered by unit tests (timezones, midnight crossing, overrides). |
 | NFR-010 | Portability | All infrastructure shall be reproducible from Terraform in a new environment (e.g. dev and prod scheduler instances). |
 
 ## 11. Security Requirements
@@ -541,8 +540,9 @@ Priority: Must
 | R-03 | ARM throttling in large estates | Medium | Low | Resource Graph discovery, bounded parallelism, back-off |
 | R-04 | Applications fail after restart due to dependency order | Medium | Medium | `schedule-order`, offsets, owner testing during pilot |
 | R-05 | Stopping RI-covered resources gives no saving | Low | Medium | BR-006, FinOps report |
-| R-06 | Wrong timezone or holiday data | Medium | Low | Unit tests, dry-run pilot, review of calendars |
+| R-06 | Wrong timezone configuration | Medium | Low | Unit tests, dry-run pilot, profile review |
 | R-07 | AKS stopped beyond the platform's maximum stopped duration | High | Very low | Alert on clusters stopped longer than 30 days |
+| R-08 | Resources run unused on public holidays until phase 2 | Low | High | Owners set a `stopped` override for long holidays; FR-028 in phase 2 |
 
 ## 17. Open Issues and Gaps
 
@@ -555,8 +555,8 @@ Priority: Must
 | OI-05 | On-demand endpoint exposure | Security | Closed – D-05 (deferred to phase 2; exposure re-assessed then, FR-027) |
 | OI-06 | Production opt-in | Governance | Closed – D-06 |
 | OI-07 | Function runtime language | Platform Team | Proposed – Python 3.11 (PowerShell 7.4 alternative) |
-| OI-08 | ⚠️ GAP: Should resources stay stopped on public holidays? If yes, confirm the calendar (e.g. Thai public holidays) and who maintains `config/holidays/` each year. | FinOps / Platform Team | Open |
-| OI-09 | ⚠️ GAP: Azure SQL Database (provisioned) cannot be stopped. Choose: (a) convert non-prod databases to serverless with auto-pause, (b) build the `sqldb` scale-down handler, or (c) leave out of scope. | Workload Owners / FinOps | Open |
+| OI-08 | Public holiday handling | FinOps / Platform Team | Closed – D-07 (phase 2) |
+| OI-09 | Azure SQL Database handling | Workload Owners / FinOps | Closed – D-08 (out of scope) |
 
 ### 17.1 Decision log
 
@@ -568,13 +568,15 @@ Priority: Must
 | D-04 | 2026-10-03 | All database types with a stop operation are in scope, including HA servers and SQL MI. |
 | D-05 | 2026-10-03 | On-demand HTTP endpoint deferred to phase 2. Phase 1 uses override tags. |
 | D-06 | 2026-10-03 | No production opt-in; production subscriptions are always excluded. |
+| D-07 | 2026-10-03 | Public holiday calendars deferred to phase 2. |
+| D-08 | 2026-10-03 | Azure SQL Database is out of scope. |
 
 ## 18. Glossary
 
 | Term | Definition |
 |---|---|
 | Reconciliation | Comparing the desired state with the actual state and acting only on differences |
-| Profile | Named schedule definition (run windows, timezone, holidays) |
+| Profile | Named schedule definition (run windows, timezone, start offsets) |
 | Desired state | `Running` or `Stopped`, computed from the profile at a point in time |
 | Flex Consumption | Azure Functions hosting plan with per-execution billing and VNet support |
 | NCRONTAB | Six-field CRON format (including seconds) used by Azure Functions timer triggers |
@@ -588,3 +590,4 @@ Priority: Must
 |---|---|---|
 | 0.1 | 2026-10-03 | Initial draft |
 | 0.2 | 2026-10-03 | Incorporated decisions D-02 to D-06: standard Bangkok profile, override state tag, all databases in scope, on-demand endpoint deferred to phase 2, production hard-excluded. Added OI-08 (holidays) and OI-09 (Azure SQL Database). |
+| 0.3 | 2026-10-03 | Decisions D-07 (holidays to phase 2, FR-028) and D-08 (Azure SQL Database out of scope). Removed holiday fields from the phase 1 profile schema. Added risk R-08. |

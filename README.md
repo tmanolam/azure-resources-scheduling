@@ -2,7 +2,7 @@
 
 > Tag-driven start/stop scheduling for Azure resources (VM, VMSS, AKS, PostgreSQL/MySQL Flexible Server, SQL MI, Application Gateway), running as a timer-triggered Azure Function and deployed with Terraform.
 
-**Last updated:** 2026-10-03 (v0.2) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+**Last updated:** 2026-10-03 (v0.3) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 
 ## Table of Contents
 
@@ -76,8 +76,6 @@ azure-power-scheduler/
 │   └── REQUIREMENTS.md
 ├── config/                         # Loaded into App Configuration by Terraform
 │   ├── settings.json               # scopes, resource types, safety limits
-│   ├── holidays/
-│   │   └── public-2026.json
 │   └── profiles/
 │       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok
 │       └── sandbox-default.json
@@ -240,7 +238,7 @@ tags = {
 }
 ```
 
-Review the schedule profiles in `config/profiles/` and the holiday calendar in `config/holidays/` before deploying (see [Configuration Reference](#configuration-reference)).
+Review the schedule profiles in `config/profiles/` before deploying (see [Configuration Reference](#configuration-reference)).
 
 > ⚠️ Warning: Do not commit `backend.hcl` or `terraform.tfvars` if they contain environment-specific identifiers your organisation treats as sensitive. Both are listed in `.gitignore`.
 
@@ -259,7 +257,7 @@ Review the plan. For a first deployment you should see creations of roughly thes
 
 - resource group, storage account and container, user-assigned identity;
 - Flex Consumption plan and Function App;
-- App Configuration store and keys (one per profile, holiday calendar and setting);
+- App Configuration store and keys (one per profile and setting);
 - Application Insights, alert rules and action group;
 - custom role definition **Resource Power Operator**;
 - one role assignment per in-scope management group;
@@ -379,13 +377,13 @@ The standard profile, `config/profiles/weekday-0830-1730.json`:
   "runWindows": [
     { "days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:30", "stop": "17:30" }
   ],
-  "holidayCalendar": "public-2026",
-  "stopOnHolidays": true,
   "startOffsetMinutesByOrder": { "1": -30, "2": -15, "3": 0 }
 }
 ```
 
 The file name (without `.json`) is the profile name used in the `schedule-profile` tag. With these offsets, databases (order 1) start at 08:00, AKS and Application Gateway (order 2) at 08:15, and VMs (order 3) at 08:30. Everything stops at 17:30, in reverse order.
+
+> 📝 Note: Public holidays are not handled in phase 1; resources follow the weekday schedule. For a long holiday, set a `stopped` override (see [Ad-hoc start or stop](#ad-hoc-start-or-stop-override)). Azure SQL Database is not supported.
 
 ### Terraform variables
 
