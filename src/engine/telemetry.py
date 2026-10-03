@@ -6,17 +6,29 @@ decision and every cycle is queryable (OBS-001, OBS-002) and the alert rules
 
 How it reaches Application Insights
 -----------------------------------
-Records are written via the standard ``logging`` module with a
-``custom_dimensions`` dict passed through ``extra``. The Azure Monitor /
-OpenCensus log handler configured by the Functions host maps that dict to the
-``customDimensions`` column, so a record emitted here as::
+Records are written via the standard ``logging`` module. The Azure Monitor
+OpenTelemetry distribution (configured once at worker start by
+``observability.configure_telemetry``) attaches a ``LoggingHandler`` whose
+exporter maps **flat** fields passed through ``extra`` to the ``customDimensions``
+column of the ``traces`` table.
 
-    logger.info("pwrsched.decision", extra={"custom_dimensions": {...}})
+Under OpenTelemetry a log attribute value must be a scalar (str/number/bool),
+**not** a nested dict. The previous ``extra={"custom_dimensions": {...}}`` form
+is an OpenCensus convention that the OpenTelemetry exporter drops, so each field
+is emitted as its own flat attribute instead, namespaced ``pwrsched.*`` to avoid
+collisions::
 
-is queryable in KQL as ``traces | where customDimensions.event == "..."``.
+    logger.info("pwrsched.decision",
+                extra={"pwrsched.event": "pwrsched.decision",
+                       "pwrsched.resourceId": "...", ...})
+
+In KQL these appear as ``customDimensions["pwrsched.event"]`` etc. (dotted keys
+must be bracket-indexed, not dot-accessed).
 
 Field contract (must match README Step 6 query and infra/modules/monitoring KQL)
 --------------------------------------------------------------------------------
+Every field is emitted under the ``pwrsched.`` prefix in ``customDimensions``:
+
 * ``pwrsched.decision`` — one per evaluated resource:
     event, runId, resourceId, type, profile, desiredState, actualState,
     action, dryRun, result, error
@@ -28,17 +40,18 @@ Field contract (must match README Step 6 query and infra/modules/monitoring KQL)
     event, runId, cap, deferred
 
 The functions take values as plain types so they are fully unit-testable by
-capturing log records; no Azure SDK is required.
+capturing log records; no Azure SDK is required. ``ATTR_PREFIX`` is applied to
+every field key so tests and KQL share a single source of truth.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from .models import PlannedAction
 
 __all__ = [
+    "ATTR_PREFIX",
     "DECISION_EVENT",
     "SUMMARY_EVENT",
     "CAP_REACHED_EVENT",
@@ -50,14 +63,26 @@ __all__ = [
 # Dedicated logger name so telemetry can be routed/levelled independently.
 logger = logging.getLogger("pwrsched.telemetry")
 
+# Prefix applied to every flat attribute key so OpenTelemetry attributes do not
+# collide with other log fields and are easy to select in KQL (H1).
+ATTR_PREFIX = "pwrsched."
+
 DECISION_EVENT = "pwrsched.decision"
 SUMMARY_EVENT = "pwrsched.summary"
 CAP_REACHED_EVENT = "pwrsched.capReached"
 
 
-def _dims(**fields) -> dict:
-    """Build a custom_dimensions dict, dropping None values for cleanliness."""
-    return {k: v for k, v in fields.items() if v is not None}
+def _attrs(**fields) -> dict:
+    """Build a flat OpenTelemetry attribute dict (``pwrsched.<field>`` keys).
+
+    None values are dropped (OpenTelemetry attribute values must be scalars and
+    an absent field is simply omitted).
+    """
+    return {
+        f"{ATTR_PREFIX}{k}": v
+        for k, v in fields.items()
+        if v is not None
+    }
 
 
 def emit_decision(
@@ -74,7 +99,7 @@ def emit_decision(
     """
     r = action.resource
     result = action.result or ("planned" if action.action.value != "none" else action.reason)
-    dims = _dims(
+    attrs = _attrs(
         event=DECISION_EVENT,
         runId=run_id,
         resourceId=r.resource_id,
@@ -87,7 +112,7 @@ def emit_decision(
         result=result,
         error=action.warning,
     )
-    logger.info(DECISION_EVENT, extra={"custom_dimensions": dims})
+    logger.info(DECISION_EVENT, extra=attrs)
 
 
 def emit_summary(
@@ -102,7 +127,7 @@ def emit_summary(
     duration_seconds: float,
 ) -> None:
     """Emit one ``pwrsched.summary`` record per cycle (OBS-002, OBS-003)."""
-    dims = _dims(
+    attrs = _attrs(
         event=SUMMARY_EVENT,
         runId=run_id,
         evaluated=evaluated,
@@ -113,10 +138,10 @@ def emit_summary(
         capReached=cap_reached,
         durationSeconds=round(duration_seconds, 3),
     )
-    logger.info(SUMMARY_EVENT, extra={"custom_dimensions": dims})
+    logger.info(SUMMARY_EVENT, extra=attrs)
 
 
 def emit_cap_reached(*, run_id: str, cap: int, deferred: int) -> None:
     """Emit ``pwrsched.capReached`` when maxActionsPerRun truncates a cycle (OBS-005)."""
-    dims = _dims(event=CAP_REACHED_EVENT, runId=run_id, cap=cap, deferred=deferred)
-    logger.warning(CAP_REACHED_EVENT, extra={"custom_dimensions": dims})
+    attrs = _attrs(event=CAP_REACHED_EVENT, runId=run_id, cap=cap, deferred=deferred)
+    logger.warning(CAP_REACHED_EVENT, extra=attrs)

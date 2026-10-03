@@ -25,10 +25,16 @@ class ActualState(str, Enum):
     TRANSITIONAL covers Starting/Stopping/Updating; the engine skips these and
     retries next cycle (FR-033). UNKNOWN means the handler could not determine
     the state and the resource is skipped and logged.
+
+    STOPPED_ALLOCATED is a VM/VMSS shut down from inside the OS (Azure reports
+    ``PowerState/stopped``): it is powered off but still allocated and billed for
+    compute. When the desired state is Stopped it must still be *deallocated*
+    (HR-001, OBJ-01, finding H4); when Running it must be started.
     """
 
     RUNNING = "Running"
     STOPPED = "Stopped"
+    STOPPED_ALLOCATED = "StoppedAllocated"
     TRANSITIONAL = "Transitional"
     UNKNOWN = "Unknown"
 
@@ -55,6 +61,16 @@ class ResourceRecord:
             this holds the resource's own tags; selection merges the rest.
         subscription_tags: Tags on the owning subscription (for BR-003 prod check).
         resource_group_tags: Tags on the owning resource group.
+        subscription_container_seen: True when discovery successfully read the
+            subscription container row (resourcecontainers join). When False,
+            subscription tags could not be read and selection must fail safe
+            (treat as ineligible rather than assume non-production) — C1.
+        power_state: Actual power/operational state read from Resource Graph at
+            discovery time (M1), so planning avoids a per-resource ARM call.
+            Empty when unavailable (engine falls back to a handler read).
+        mg_chain: Management-group names in the subscription's ancestor chain
+            (from Resource Graph), used to exclude resources under a nested
+            excluded MG (M2). Empty when unavailable.
     """
 
     resource_id: str
@@ -66,6 +82,9 @@ class ResourceRecord:
     tags: Mapping[str, str] = field(default_factory=dict)
     subscription_tags: Mapping[str, str] = field(default_factory=dict)
     resource_group_tags: Mapping[str, str] = field(default_factory=dict)
+    subscription_container_seen: bool = True
+    power_state: str = ""
+    mg_chain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

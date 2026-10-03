@@ -71,10 +71,23 @@ class QueryFn(Protocol):
 
 
 def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
-    """Build the KQL query that returns only enabled, tagged resource types.
+    """Build the KQL query returning enabled resource types with inherited tags.
 
-    Only resources carrying a ``schedule-profile`` tag are returned (BR-002:
-    opt-in only), reducing the result set before engine-side filtering.
+    The query joins ``resourcecontainers`` twice so each resource row carries
+    its subscription's and resource group's tags in addition to its own:
+
+    - ``subscriptionTags``   — tags on ``microsoft.resources/subscriptions``;
+      used for the production hard-exclusion (BR-003) and tag inheritance
+      (FR-013).
+    - ``resourceGroupTags``  — tags on
+      ``microsoft.resources/subscriptions/resourcegroups``; used for tag
+      inheritance and RG-level overrides (FR-013, FR-025, US-06).
+
+    Opt-in (BR-002) is enforced *after* the merge: a resource is kept when a
+    ``schedule-profile`` tag resolves at the resource, RG, or subscription level
+    (``coalesce`` with resource precedence). This lets a resource inherit the
+    profile from its RG or subscription (C2). Production filtering and the final
+    tag-precedence resolution still happen in :mod:`engine.selection`.
     """
     enabled_types = [
         TYPE_BY_HANDLER[k] for k in enabled_handler_keys if k in TYPE_BY_HANDLER
@@ -84,8 +97,40 @@ def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
     return (
         "Resources "
         f"| where tolower(type) in ({types_literal}) "
-        "| where isnotempty(tags['schedule-profile']) "
-        "| project id, type, subscriptionId, resourceGroup, location, tags"
+        # Join the resource group container to pick up RG-level tags. Resource
+        # Graph exposes the RG container's name (not full id) and its owning
+        # subscription, so match on (subscriptionId, resourceGroup name).
+        "| join kind=leftouter ("
+        "ResourceContainers "
+        "| where tolower(type) == 'microsoft.resources/subscriptions/resourcegroups' "
+        "| project rgSubId = subscriptionId, rgName = tolower(name), "
+        "resourceGroupTags = tags"
+        ") on $left.subscriptionId == $right.rgSubId "
+        "and $left.resourceGroup == $right.rgName "
+        # Join the subscription container to pick up subscription-level tags.
+        "| join kind=leftouter ("
+        "ResourceContainers "
+        "| where tolower(type) == 'microsoft.resources/subscriptions' "
+        "| project subId = subscriptionId, subscriptionTags = tags, "
+        "mgChain = properties.managementGroupAncestorsChain"
+        ") on $left.subscriptionId == $right.subId "
+        # Opt-in only, resolved across resource > RG > subscription (BR-002).
+        "| where isnotempty(coalesce("
+        "tags['schedule-profile'], "
+        "resourceGroupTags['schedule-profile'], "
+        "subscriptionTags['schedule-profile'])) "
+        # M1: read the actual power/operational state directly from Resource
+        # Graph so planning needs no per-resource ARM call. Each handler type
+        # exposes it under a different property; coalesce across them. VM/VMSS
+        # power state comes from the extended instance view.
+        "| extend powerState = tostring(coalesce("
+        "properties.extended.instanceView.powerState.code, "   # vm
+        "properties.powerState.code, "                          # aks
+        "properties.state, "                                    # postgres/mysql flex, sqlmi
+        "properties.operationalState"                           # appgw
+        ")) "
+        "| project id, type, subscriptionId, resourceGroup, location, tags, "
+        "resourceGroupTags, subscriptionTags, mgChain, powerState"
     )
 
 
@@ -162,6 +207,21 @@ def _row_to_record(row: Mapping[str, object]) -> Optional[ResourceRecord]:
     tags_raw = row.get("tags") or {}
     tags = {str(k): str(v) for k, v in tags_raw.items()} if isinstance(tags_raw, Mapping) else {}
 
+    # Inherited tags from the resource group and subscription containers (C1/C2).
+    # A leftouter join leaves these absent/null when the container row could not
+    # be read (e.g. the identity lacks Microsoft.Resources/subscriptions/read).
+    sub_tags_raw = row.get("subscriptionTags")
+    rg_tags_raw = row.get("resourceGroupTags")
+    subscription_tags = _coerce_tags(sub_tags_raw)
+    resource_group_tags = _coerce_tags(rg_tags_raw)
+
+    # Whether the subscription container row was returned at all. ``mgChain`` is
+    # only present on the subscription container, so its presence is a reliable
+    # signal that the subscription row joined. Used by selection's fail-safe
+    # (C1): if the subscription could not be read we must not treat the resource
+    # as production-safe.
+    subscription_seen = ("subscriptionTags" in row) or ("mgChain" in row)
+
     return ResourceRecord(
         resource_id=resource_id,
         resource_type=resource_type,
@@ -170,4 +230,49 @@ def _row_to_record(row: Mapping[str, object]) -> Optional[ResourceRecord]:
         resource_group=str(row.get("resourceGroup", "")),
         location=str(row.get("location", "")),
         tags=tags,
+        subscription_tags=subscription_tags,
+        resource_group_tags=resource_group_tags,
+        subscription_container_seen=subscription_seen,
+        power_state=_coerce_power_state(row.get("powerState")),
+        mg_chain=_coerce_mg_chain(row.get("mgChain")),
     )
+
+
+def _coerce_mg_chain(raw: object) -> tuple[str, ...]:
+    """Extract MG names from the Resource Graph managementGroupAncestorsChain (M2).
+
+    The chain is a list of objects, each with a ``name`` (and ``displayName``).
+    Returns a tuple of the ``name`` values (lowercased for comparison).
+    """
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    names: list[str] = []
+    for entry in raw:
+        if isinstance(entry, Mapping):
+            name = entry.get("name") or entry.get("displayName")
+            if name:
+                names.append(str(name).lower())
+        elif isinstance(entry, str):
+            names.append(entry.lower())
+    return tuple(names)
+
+
+def _coerce_power_state(raw: object) -> str:
+    """Normalise the Resource Graph power-state value to a clean token (M1).
+
+    VM/VMSS report ``PowerState/<code>``; strip the prefix. Returns "" when the
+    state is absent (then the engine falls back to a per-resource ARM read).
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    s = raw.strip()
+    if "/" in s:
+        s = s.split("/", 1)[1]
+    return s
+
+
+def _coerce_tags(raw: object) -> dict[str, str]:
+    """Normalise a Resource Graph tags value (which may be null) to a str map."""
+    if isinstance(raw, Mapping):
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}

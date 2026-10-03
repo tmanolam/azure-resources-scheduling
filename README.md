@@ -79,8 +79,7 @@ azure-power-scheduler/
 ├── docs/
 │   └── REQUIREMENTS.md
 ├── config/                         # Loaded into App Configuration by Terraform
-│   ├── settings.json               # scopes, resource types, safety limits
-│   └── profiles/
+│   └── profiles/                   # schedule profiles (settings come from tfvars)
 │       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok
 │       └── sandbox-default.json
 ├── infra/
@@ -327,14 +326,14 @@ RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
 az monitor app-insights query --app "$APPI" --resource-group "$RG" --analytics-query '
 traces
 | where timestamp > ago(1h)
-| where customDimensions.event == "pwrsched.decision"
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
 | project timestamp,
-          resource = tostring(customDimensions.resourceId),
-          profile  = tostring(customDimensions.profile),
-          desired  = tostring(customDimensions.desiredState),
-          actual   = tostring(customDimensions.actualState),
-          action   = tostring(customDimensions.action),
-          dryRun   = tostring(customDimensions.dryRun)
+          resource = tostring(customDimensions["pwrsched.resourceId"]),
+          profile  = tostring(customDimensions["pwrsched.profile"]),
+          desired  = tostring(customDimensions["pwrsched.desiredState"]),
+          actual   = tostring(customDimensions["pwrsched.actualState"]),
+          action   = tostring(customDimensions["pwrsched.action"]),
+          dryRun   = tostring(customDimensions["pwrsched.dryRun"])
 | order by timestamp desc' -o table
 ```
 
@@ -397,6 +396,8 @@ func azure functionapp publish "$FUNC_APP" --python
 ```
 
 > 📝 Note: Production is hard-excluded in **every** tenant (subscriptions tagged `environment=prod`), regardless of configuration.
+
+> 📝 Note: **Schedule profiles in `config/profiles/` are shared across all tenants** — the same profile files are loaded into every tenant's App Configuration. Per-tenant settings (scopes, enabled types, dry-run) differ via each tenant's `.tfvars`, but the profiles do not. If a tenant needs a different schedule, add a new profile file (used only where its name is tagged) rather than editing a shared one; per-tenant profile directories are a possible future enhancement (finding L6).
 
 > ⚠️ Warning: Always confirm you are logged in to the correct tenant before `apply`. `deploy.sh` re-initialises the backend for the named tenant, but it cannot verify your Azure CLI session points at the same tenant.
 

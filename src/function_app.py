@@ -27,25 +27,32 @@ import azure.functions as func
 
 app = func.FunctionApp()
 
-_SCHEDULE = os.environ.get("RECONCILE_SCHEDULE", "0 */15 * * * *")
-
 # Default start order per handler key (§8.1), used when schedule-order is unset.
-_DEFAULT_ORDER = {
-    "postgres-flex": 1, "mysql-flex": 1, "sqlmi": 1, "synapse-pool": 1,
-    "aks": 2, "appgw": 2,
-    "vm": 3, "vmss": 3,
-}
+# Imported from the single source of truth in handlers.base (L4). The import is
+# at module load (no Azure SDK) and avoids a duplicated map drifting out of sync.
+from handlers.base import DEFAULT_ORDER_BY_HANDLER as _DEFAULT_ORDER  # noqa: E402
 
 
 @app.function_name(name="reconcile")
 @app.timer_trigger(
-    schedule=_SCHEDULE,
+    # Bind the schedule via an app-setting expression resolved by the host at
+    # load time (L3), instead of reading os.environ at import. Default lives in
+    # the RECONCILE_SCHEDULE app setting (Terraform sets it; FR-001).
+    schedule="%RECONCILE_SCHEDULE%",
     arg_name="timer",
     run_on_startup=False,
     use_monitor=True,
 )
 def reconcile(timer: func.TimerRequest) -> None:
     """Run one reconciliation cycle."""
+    # Ensure telemetry is exported to Application Insights (H1). Idempotent.
+    try:
+        from observability import configure_telemetry
+
+        configure_telemetry()
+    except Exception:  # noqa: BLE001 — telemetry setup must never block a cycle
+        logging.exception("pwrsched: telemetry configuration failed; continuing")
+
     run_id = str(uuid.uuid4())
     if timer.past_due:
         logging.info("pwrsched: timer past due; running recovery cycle (FR-007) run=%s", run_id)

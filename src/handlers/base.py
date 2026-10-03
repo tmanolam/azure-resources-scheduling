@@ -12,8 +12,9 @@ Design for testability:
   so unit tests pass fakes and no network/credential is required.
 - State is returned as free text; the engine normalises it (see
   ``engine.reconcile._normalise_actual``). Handlers raise :class:`HandlerSkip`
-  to signal "skip and do not retry until configuration changes" (HR-004) and
-  :class:`engine.reconcile.RetryableThrottling` to signal HTTP 429.
+  to signal "skip and do not retry until configuration changes" (HR-004).
+  HTTP 429 throttling is handled by the Azure SDK's own retry policy
+  (configured in ``runtime``), not by the handlers (M3).
 """
 
 from __future__ import annotations

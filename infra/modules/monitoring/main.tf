@@ -50,16 +50,19 @@ resource "azurerm_monitor_action_group" "this" {
   tags = var.tags
 }
 
-# --- OBS-003: cycle failed or no run for >45 minutes ------------------------
-# A scheduled query alert: fire when no cycle-summary trace in the last 45 min,
-# or when a cycle logs a failure.
+# --- OBS-003: cycle has not run (no summary) for >45 minutes ----------------
+# A scheduled query alert: fire when fewer than one cycle-summary trace appears
+# in the window. ``summarize cycles = count()`` yields a single row whose value
+# is the count, so the alert must aggregate on that *value* (metric_measure_column
+# = "cycles", Total), not on row count — otherwise it always sees one row and can
+# never fire (finding H2).
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cycle_health" {
   name                = "${var.alert_prefix}-cycle-health"
   resource_group_name = var.resource_group_name
   location            = var.location
   severity            = 1
   scopes              = [azurerm_application_insights.this.id]
-  description         = "Reconciliation cycle failed or has not run for >45 minutes (OBS-003)."
+  description         = "Reconciliation cycle has not run (no summary) for >45 minutes (OBS-003)."
 
   evaluation_frequency = "PT15M"
   window_duration      = "PT45M"
@@ -67,12 +70,51 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cycle_health" {
   criteria {
     query                   = <<-KQL
       traces
-      | where customDimensions.event == "pwrsched.summary"
+      | where customDimensions["pwrsched.event"] == "pwrsched.summary"
       | summarize cycles = count()
     KQL
-    time_aggregation_method = "Count"
+    time_aggregation_method = "Total"
+    metric_measure_column   = "cycles"
     threshold               = 0
     operator                = "LessThanOrEqual"
+
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.this.id]
+  }
+
+  tags = var.tags
+}
+
+# --- OBS-003 (second condition): a reconcile cycle threw an exception --------
+# The cycle-health alert above covers "did not run"; this covers "ran and
+# failed" by watching the exceptions table for the reconcile operation (H2).
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cycle_exceptions" {
+  name                = "${var.alert_prefix}-cycle-exceptions"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  severity            = 1
+  scopes              = [azurerm_application_insights.this.id]
+  description         = "A reconciliation cycle threw an exception (OBS-003)."
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT15M"
+
+  criteria {
+    query                   = <<-KQL
+      exceptions
+      | where operation_Name == "reconcile"
+      | summarize failures = count()
+    KQL
+    time_aggregation_method = "Total"
+    metric_measure_column   = "failures"
+    threshold               = 0
+    operator                = "GreaterThan"
 
     failing_periods {
       minimum_failing_periods_to_trigger_alert = 1
@@ -102,10 +144,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cap_reached" {
   criteria {
     query                   = <<-KQL
       traces
-      | where customDimensions.event == "pwrsched.capReached"
+      | where customDimensions["pwrsched.event"] == "pwrsched.capReached"
       | summarize hits = count()
     KQL
-    time_aggregation_method = "Count"
+    time_aggregation_method = "Total"
+    metric_measure_column   = "hits"
     threshold               = 0
     operator                = "GreaterThan"
 
@@ -137,12 +180,14 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "repeated_failures" {
   criteria {
     query                   = <<-KQL
       traces
-      | where customDimensions.event == "pwrsched.decision"
-      | where tostring(customDimensions.result) == "failed"
-      | summarize failures = dcount(tostring(customDimensions.runId)) by resource = tostring(customDimensions.resourceId)
+      | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+      | where tostring(customDimensions["pwrsched.result"]) == "failed"
+      | summarize failures = dcount(tostring(customDimensions["pwrsched.runId"])) by resource = tostring(customDimensions["pwrsched.resourceId"])
       | where failures >= 3
+      | summarize offenders = count()
     KQL
-    time_aggregation_method = "Count"
+    time_aggregation_method = "Total"
+    metric_measure_column   = "offenders"
     threshold               = 0
     operator                = "GreaterThan"
 

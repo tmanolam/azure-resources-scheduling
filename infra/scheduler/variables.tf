@@ -74,7 +74,17 @@ variable "log_analytics_workspace_id" {
 variable "enable_private_networking" {
   type        = bool
   default     = false
-  description = "Private endpoints + VNet integration (SEC-007)."
+  description = "Private endpoints + VNet integration (SEC-007). NOT IMPLEMENTED in phase 1: setting true only disables public access without creating private endpoints or DNS, which breaks the deployment. Rejected by validation until private endpoints land."
+
+  validation {
+    # Finding H5: enabling private networking currently disables public access
+    # on Storage and App Configuration but creates no private endpoints or
+    # private DNS, so the Function App cannot reach storage (won't start) and
+    # Terraform cannot write App Configuration keys. Fail fast with a clear
+    # message rather than producing a broken deployment.
+    condition     = var.enable_private_networking == false
+    error_message = "enable_private_networking is not supported yet: it would disable public access without provisioning private endpoints or DNS, breaking the Function App and Terraform's App Configuration writes (finding H5). Keep it false until private endpoints are implemented."
+  }
 }
 
 variable "integration_subnet_id" {

@@ -25,7 +25,7 @@ variable "deployer_object_id" {
 
 variable "config_root" {
   type        = string
-  description = "Absolute path to the repo config/ directory containing settings.json and profiles/."
+  description = "Absolute path to the repo config/ directory containing profiles/. Global settings come from var.settings (single source of truth; M6)."
 }
 
 variable "settings" {
@@ -37,7 +37,7 @@ variable "settings" {
     max_actions_per_run    = number
     reconcile_schedule     = string
   })
-  description = "Effective global settings written as App Configuration keys (overrides config/settings.json for environment-specific values)."
+  description = "Global settings written as App Configuration keys. This is the single source of truth for settings (from terraform.tfvars); M6."
 }
 
 variable "public_network_access" {

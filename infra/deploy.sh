@@ -77,13 +77,15 @@ case "${COMMAND}" in
     ;;
   apply)
     init
-    # Apply the saved plan if present; otherwise apply the var-file directly
-    # (Terraform will still prompt for confirmation).
-    if [[ -f "${ROOT_DIR}/${TENANT}.tfplan" ]]; then
-      terraform -chdir="${ROOT_DIR}" apply -input=false "${TENANT}.tfplan"
-    else
-      terraform -chdir="${ROOT_DIR}" apply -input=false -var-file="${VAR_FILE}"
-    fi
+    # Require a fresh saved plan (M7). Applying a var-file directly with
+    # -input=false cannot prompt and fails; and reusing a stale .tfplan is
+    # rejected by Terraform. So: insist on a plan, apply it, then delete it.
+    PLAN_FILE="${ROOT_DIR}/${TENANT}.tfplan"
+    [[ -f "${PLAN_FILE}" ]] || die "no saved plan for '${TENANT}'. Run './infra/deploy.sh ${TENANT} plan' first, review it, then apply."
+    terraform -chdir="${ROOT_DIR}" apply -input=false "${TENANT}.tfplan"
+    # Delete the plan so a later apply cannot reuse this now-stale one (M7).
+    rm -f "${PLAN_FILE}"
+    echo "==> Applied and removed ${TENANT}.tfplan (run 'plan' again before the next apply)."
     ;;
   output)
     init

@@ -36,6 +36,24 @@ resource "azurerm_role_assignment" "identity_blob_owner" {
   scope                = azurerm_storage_account.this.id
   role_definition_name = "Storage Blob Data Owner"
   principal_id         = var.identity_principal_id
+  principal_type       = "ServicePrincipal" # L2: avoid propagation races on a new identity
+}
+
+# The Functions host's identity-based AzureWebJobsStorage connection (M4) uses
+# queues for the timer singleton lease and tables for the schedule monitor
+# (use_monitor=True), so the identity also needs queue and table data roles.
+resource "azurerm_role_assignment" "identity_queue_contributor" {
+  scope                = azurerm_storage_account.this.id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = var.identity_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "identity_table_contributor" {
+  scope                = azurerm_storage_account.this.id
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = var.identity_principal_id
+  principal_type       = "ServicePrincipal"
 }
 
 # --- Flex Consumption plan (D-01, A-03) -------------------------------------
@@ -83,6 +101,16 @@ resource "azurerm_function_app_flex_consumption" "this" {
     "APP_CONFIG_ENDPOINT"      = var.app_config_endpoint
     "RECONCILE_SCHEDULE"       = var.reconcile_schedule
     "FUNCTIONS_WORKER_RUNTIME" = "python"
+    # Telemetry export to Application Insights via OpenTelemetry (H1).
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = var.app_insights_connection_string
+
+    # Host storage for the timer singleton lease and schedule monitor
+    # (use_monitor=True / IsPastDue recovery). With shared keys disabled this
+    # must be an identity-based connection, not a connection string (M4,
+    # FR-007, NFR-004, SEC-001).
+    "AzureWebJobsStorage__accountName" = azurerm_storage_account.this.name
+    "AzureWebJobsStorage__credential"  = "managedidentity"
+    "AzureWebJobsStorage__clientId"    = var.identity_client_id
   }
 
   site_config {

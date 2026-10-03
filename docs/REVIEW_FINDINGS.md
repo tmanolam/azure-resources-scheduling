@@ -7,7 +7,7 @@
 | Reviewed commit | `f081718` (main) |
 | Review date | 2026-10-03 |
 | Scope | `src/`, `infra/`, `config/`, `tests/`, `.github/workflows/ci.yml`, docs |
-| Overall verdict | **Not ready for T-602 (dry run).** Fix all Critical items first; fix High items before go-live (T-603). |
+| Overall verdict | **Code/static fixes complete (21/22 findings closed).** All Critical, High, Medium and Low items are resolved and verified offline (pytest 126 passed/7 skipped; ruff clean; `terraform fmt`/`validate` pass). Remaining before go-live: **live-deployment verification** — T-602 (dry run) and T-603 (go-live), which require Azure access and the real OI-01 scope values. |
 
 > **How to use this document:** Each finding has an ID, severity, location, evidence, a recommended fix and acceptance criteria. When a finding is fixed, update its **Status**, fill in **Resolved in** (commit or PR) and add a line to the [Status log](#status-log). Do not delete findings; mark them `Closed` or `Won't fix` with a reason.
 
@@ -21,30 +21,30 @@
 
 | ID | Severity | Title | Requirements affected | Status | Resolved in |
 |---|---|---|---|---|---|
-| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | 🔴 Open | |
-| C2 | Critical | Resource group and subscription tags are ignored | FR-013, FR-025, US-06 | 🔴 Open | |
-| C3 | Critical | SQL Managed Instance handler cannot start or stop | §8.1 `sqlmi`, D-04 | 🔴 Open | |
-| H1 | High | Decision data probably does not reach Application Insights | OBS-001, OBS-002, OBS-003–005 | 🔍 Needs verification | |
-| H2 | High | Cycle-health alert can never fire | OBS-003 | 🔴 Open | |
-| H3 | High | Handler skips are counted as failures and retried | HR-001, HR-004, OBS-004 | 🔴 Open | |
-| H4 | High | Powered-off (not deallocated) VMs are never deallocated | HR-001, OBJ-01 | 🔴 Open | |
-| H5 | High | Private networking option breaks the deployment | SEC-007 | 🔴 Open | |
-| H6 | High | Fixed resource names will collide globally | NFR-010 | 🔴 Open | |
-| M1 | Medium | Cycle will exceed the 5-minute timeout at scale | NFR-002, NFR-005 | 🔴 Open | |
-| M2 | Medium | Subscription/RG include scopes and nested MG excludes don't work | FR-010, FR-011 | 🔴 Open | |
-| M3 | Medium | Custom 429 back-off is dead code | NFR-005 | 🔴 Open | |
-| M4 | Medium | Host storage connection for the timer not explicitly configured | FR-007, NFR-004, SEC-001 | 🔍 Needs verification | |
-| M5 | Medium | `succeeded` is treated as a Running power state | FR-004 | 🔴 Open | |
-| M6 | Medium | `config/settings.json` is not used by Terraform | IAC-004 | 🔴 Open | |
-| M7 | Medium | `deploy.sh apply` fails without a plan and reuses stale plans | IAC-007 | 🔴 Open | |
-| L1 | Low | `azuread` provider declared but unused | IAC-005 | 🔴 Open | |
-| L2 | Low | RBAC module lacks scope validation and `principal_type` | SEC-003, R-01 | 🔴 Open | |
-| L3 | Low | Timer schedule read from environment at import time | FR-001 | 🔴 Open | |
-| L4 | Low | Default order map duplicated | HR-005 | 🔴 Open | |
-| L5 | Low | Lint issues; no linter in CI | — | 🔴 Open | |
-| L6 | Low | Task log overstates completion; profiles shared across tenants | — | 🔴 Open | |
+| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | ✅ Closed | discovery/selection/RBAC fix (local) |
+| C2 | Critical | Resource group and subscription tags are ignored | FR-013, FR-025, US-06 | ✅ Closed | discovery `resourcecontainers` join (local) |
+| C3 | Critical | SQL Managed Instance handler cannot start or stop | §8.1 `sqlmi`, D-04 | ✅ Closed | `azure-mgmt-sql==4.0.0` + surface test (local) |
+| H1 | High | Decision data probably does not reach Application Insights | OBS-001, OBS-002, OBS-003–005 | ✅ Closed | OTel flat attributes + KQL aligned (local) |
+| H2 | High | Cycle-health alert can never fire | OBS-003 | ✅ Closed | measure column + Total; +exceptions alert (local) |
+| H3 | High | Handler skips are counted as failures and retried | HR-001, HR-004, OBS-004 | ✅ Closed | explicit HandlerSkip → skipped (local) |
+| H4 | High | Powered-off (not deallocated) VMs are never deallocated | HR-001, OBJ-01 | ✅ Closed | STOPPED_ALLOCATED state + transitions (local) |
+| H5 | High | Private networking option breaks the deployment | SEC-007 | ✅ Closed | validation rejects `true` (local) |
+| H6 | High | Fixed resource names will collide globally | NFR-010 | ✅ Closed | `random_string` in global names (local) |
+| M1 | Medium | Cycle will exceed the 5-minute timeout at scale | NFR-002, NFR-005 | ✅ Closed | Resource Graph power state (local) |
+| M2 | Medium | Subscription/RG include scopes and nested MG excludes don't work | FR-010, FR-011 | ✅ Closed | scope split + mg_chain exclude (local) |
+| M3 | Medium | Custom 429 back-off is dead code | NFR-005 | ✅ Closed | rely on azure-core retry (local) |
+| M4 | Medium | Host storage connection for the timer not explicitly configured | FR-007, NFR-004, SEC-001 | ✅ Closed | AzureWebJobsStorage identity conn (local) |
+| M5 | Medium | `succeeded` is treated as a Running power state | FR-004 | ✅ Closed | removed from Running set (with H4, local) |
+| M6 | Medium | `config/settings.json` is not used by Terraform | IAC-004 | ✅ Closed | deleted; tfvars is sole source (local) |
+| M7 | Medium | `deploy.sh apply` fails without a plan and reuses stale plans | IAC-007 | ✅ Closed | apply requires+deletes plan (local) |
+| L1 | Low | `azuread` provider declared but unused | IAC-005 | ✅ Closed | removed provider (local) |
+| L2 | Low | RBAC module lacks scope validation and `principal_type` | SEC-003, R-01 | ✅ Closed | validation + principal_type (local) |
+| L3 | Low | Timer schedule read from environment at import time | FR-001 | ✅ Closed | binding expr; key informational (local) |
+| L4 | Low | Default order map duplicated | HR-005 | ✅ Closed | single source in handlers.base (local) |
+| L5 | Low | Lint issues; no linter in CI | — | ✅ Closed | ruff clean + CI job + ruff.toml (local) |
+| L6 | Low | Task log overstates completion; profiles shared across tenants | — | ✅ Closed | docs updated (local) |
 
-**Counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total, 0 closed**
+**Counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total, 21 closed** (only live-deploy verification T-602/T-603 remains)
 
 ---
 
@@ -55,7 +55,7 @@
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/discovery.py` (`build_kql_query`, `_row_to_record`); `src/engine/selection.py` (BR-003 check); `infra/modules/rbac/main.tf` |
 | **Requirements** | BR-003, US-07, A-08 |
 
@@ -82,7 +82,7 @@
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/discovery.py` (`build_kql_query`) |
 | **Requirements** | FR-013, FR-025, US-06; README "Onboard resources" and "Ad-hoc start or stop" |
 
@@ -104,7 +104,7 @@
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/requirements.txt` (`azure-mgmt-sql==3.0.1`); `src/handlers/sqlmi.py` |
 | **Requirements** | §8.1 `sqlmi` (Must), D-04 |
 
@@ -131,7 +131,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔍 Needs verification |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/telemetry.py`; README Step 6 query; `docs/VERIFICATION.md`; `infra/modules/monitoring/main.tf` (all three alerts) |
 | **Requirements** | OBS-001, OBS-002, OBS-003, OBS-004, OBS-005 |
 
@@ -154,7 +154,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/modules/monitoring/main.tf` (`cycle_health`) |
 | **Requirements** | OBS-003 |
 
@@ -175,7 +175,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/reconcile.py` (`_invoke_with_backoff`) |
 | **Requirements** | HR-001, HR-004, OBS-004 |
 
@@ -198,7 +198,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/handlers/vm.py`, `src/handlers/vmss.py`, `src/engine/reconcile.py` (`_normalise_actual`) |
 | **Requirements** | HR-001, OBJ-01 |
 
@@ -219,7 +219,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/modules/function_app/main.tf`, `infra/modules/app_config/main.tf`, `infra/scheduler/main.tf` |
 | **Requirements** | SEC-007 |
 
@@ -240,7 +240,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/scheduler/main.tf` (`locals`) |
 | **Requirements** | NFR-010; README "Multiple Tenants" |
 
@@ -262,7 +262,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/reconcile.py` (`plan_actions`, `execute_actions`); `src/host.json` (`functionTimeout`) |
 | **Requirements** | NFR-002, NFR-005 |
 
@@ -283,7 +283,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/runtime.py` (`_build_resource_graph_query_fn`); `src/engine/selection.py` (`_is_under_excluded_scope`) |
 | **Requirements** | FR-010, FR-011 |
 
@@ -305,7 +305,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/reconcile.py` (`RetryableThrottling`, `_invoke_with_backoff`) |
 | **Requirements** | NFR-005 |
 
@@ -323,7 +323,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔍 Needs verification |
+| **Status** | ✅ Closed |
 | **Location** | `infra/modules/function_app/main.tf` (`app_settings`) |
 | **Requirements** | FR-007, NFR-004, SEC-001 |
 
@@ -343,7 +343,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/engine/reconcile.py` (`_normalise_actual`) |
 | **Requirements** | FR-004 |
 
@@ -361,7 +361,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `config/settings.json`; `infra/modules/app_config/main.tf` |
 | **Requirements** | IAC-004 |
 
@@ -379,7 +379,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/deploy.sh` (`apply`) |
 | **Requirements** | IAC-007 |
 
@@ -400,7 +400,7 @@
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/scheduler/providers.tf`; REQUIREMENTS IAC-005 |
 
 Remove the provider and update IAC-005, or keep it only when phase 2 (Entra app roles for the on-demand endpoint) needs it.
@@ -409,7 +409,7 @@ Remove the provider and update IAC-005, or keep it only when phase 2 (Entra app 
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `infra/modules/rbac/main.tf`, `variables.tf` |
 
 - Add a validation on `in_scope_management_group_ids` that rejects the tenant root MG ID and any ID matching a configurable Platform MG list (SEC-003, R-01).
@@ -419,7 +419,7 @@ Remove the provider and update IAC-005, or keep it only when phase 2 (Entra app 
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/function_app.py` |
 
 Use the binding expression `schedule="%RECONCILE_SCHEDULE%"` instead of `os.environ.get(...)` at module load. Also, `pwrsched:reconcileSchedule` in App Configuration is written but never used by the trigger; remove it or document it as informational.
@@ -428,7 +428,7 @@ Use the binding expression `schedule="%RECONCILE_SCHEDULE%"` instead of `os.envi
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/function_app.py` (`_DEFAULT_ORDER`), `src/handlers/base.py` (`DEFAULT_ORDER_BY_HANDLER`) |
 
 Use `DEFAULT_ORDER_BY_HANDLER` in `function_app.py` and delete the copy.
@@ -437,7 +437,7 @@ Use `DEFAULT_ORDER_BY_HANDLER` in `function_app.py` and delete the copy.
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `src/`, `tests/`, `.github/workflows/ci.yml` |
 
 Ruff reports ~110 findings (unused imports, unused `noqa`, unused variables, root-logger calls). Run `ruff check --fix`, then add a ruff step to CI.
@@ -446,7 +446,7 @@ Ruff reports ~110 findings (unused imports, unused `noqa`, unused variables, roo
 
 | | |
 |---|---|
-| **Status** | 🔴 Open |
+| **Status** | ✅ Closed |
 | **Location** | `docs/PHASE1_TASKS.md`; `config/profiles/`; README "Multiple Tenants" |
 
 - Reopen T-202 (affected by C1/C2), T-302 (C3, H3, H4), T-404 (H5, M4), T-501/T-502 (H1, H2) until the linked findings close. T-502's "0 gaps" was a field-name check only, not a test of the telemetry pipeline.
@@ -459,3 +459,24 @@ Ruff reports ~110 findings (unused imports, unused `noqa`, unused variables, roo
 | Date | Finding(s) | Change | By |
 |---|---|---|---|
 | 2026-10-03 | All | Review completed at commit `f081718`; 22 findings opened | Claude |
+| 2026-10-03 | C1, C2 | Fixed: `build_kql_query` now joins `resourcecontainers` (RG + subscription), projects `resourceGroupTags`/`subscriptionTags`/`mgChain`, and resolves opt-in post-merge via `coalesce`; `_row_to_record` populates `subscription_tags`/`resource_group_tags`/`subscription_container_seen`; selection adds a `subscription-tags-unavailable` fail-safe; RBAC `base_actions` gains `Microsoft.Resources/subscriptions/read`. Added 8 end-to-end discovery→selection tests (prod exclusion from raw rows, fail-safe, RG/sub inheritance, RG override, precedence). pytest 110 passed/7 skipped; `terraform fmt`/`validate` clean. Code/static criteria met; the "Verified in T-602 dry run" criterion remains for the live deployment. | Kiro |
+| 2026-10-03 | C3 | Fixed: pinned `azure-mgmt-sql==4.0.0` (exposes `managed_instances.begin_start`/`begin_stop`); `_normalise_actual` already maps 4.x `Ready`/`Stopped`/`Starting`/`Stopping`. Added `tests/test_sdk_surface.py` (7 handlers); proven to FAIL on 3.0.1 and PASS on 4.0.0 in a throwaway venv. SQL MI state values against a real instance remain for T-602. | Kiro |
+| 2026-10-03 | H1 | Fixed: telemetry now emits **flat** `pwrsched.*` OpenTelemetry attributes (not a nested `custom_dimensions` dict); new `src/observability.py` configures `azure-monitor-opentelemetry` once per worker (dep pinned 1.6.4; `APPLICATIONINSIGHTS_CONNECTION_STRING` app setting added). All KQL aligned to `customDimensions["pwrsched.*"]` — monitoring module (3 alerts), README Step 6, VERIFICATION.md. Verified flat attributes land on the log record and the distro imports. Live `traces` query remains for T-602. | Kiro |
+| 2026-10-03 | H2 | Fixed: `cycle_health` now uses `metric_measure_column = "cycles"` + `Total` (was Count on rows, could never fire); added a second `cycle_exceptions` alert on `exceptions | where operation_Name == "reconcile"`. `cap_reached`/`repeated_failures` also hardened to aggregate on a measure column. `terraform validate` passes. Live firing remains for T-602. | Kiro |
+| 2026-10-03 | H3 | Fixed: `_invoke_with_backoff` returns an `InvokeOutcome`; `HandlerSkip` (matched structurally to avoid an engine→handlers import) is counted as `skipped` with result `skipped:<reason>`, not `failed`, and is not retried. Unit tests assert skipped≠failed and no retry. | Kiro |
+| 2026-10-03 | H4, M5 | Fixed: added `ActualState.STOPPED_ALLOCATED`; VM/VMSS handlers report `stopped-allocated` for `PowerState/stopped` (billed) vs `deallocated`; `_desired_to_action` deallocates (Stopped) or starts (Running) from STOPPED_ALLOCATED. Also removed `succeeded` from the Running set (M5: `_normalise_actual("Succeeded")==UNKNOWN`). Unit tests cover both transitions, the deallocated-converged case, and M5. | Kiro |
+| 2026-10-03 | H5 | Fixed: added a validation on `enable_private_networking` rejecting `true` with an explanatory message until private endpoints are implemented. Proven offline (local backend override): plan with `true` fails with the H5 message, `false` passes validation. | Kiro |
+| 2026-10-03 | H6 | Fixed: added a state-persisted `random_string` (4 lowercase alphanumerics) to the globally unique names (`func-`, `appcs-`, storage `st...`); storage name worst case 22/24 chars. Two tenants with otherwise-identical tfvars now get distinct global names. `terraform validate` passes with the new `random` provider. | Kiro |
+| 2026-10-03 | M1 | Fixed: KQL projects a coalesced `powerState` (VM extended instance view / AKS / DB `state` / AppGw `operationalState`); `_row_to_record` populates `power_state`; `plan_actions` uses `_read_actual_state` (Resource-Graph-first, VM/VMSS `stopped`→`stopped-allocated`, falls back to `handler.get_state` only when absent) so planning needs no per-resource ARM read. `max_parallel_arm_calls` retained for the fallback. Tests cover projection, population, RG-first path, and fallback. | Kiro |
+| 2026-10-03 | M2 | Fixed: `runtime._classify_scopes` splits include scopes into management groups / subscriptions / RG filters and the query_fn sets `management_groups` + `subscriptions` + an RG `where` clause; `selection._is_under_excluded_scope` now matches MG exclude scopes against the subscription's `mg_chain` (populated from `managementGroupAncestorsChain`), so excluding a child MG inside an included MG works. Tests cover classification and nested-MG exclusion. | Kiro |
+| 2026-10-03 | M3 | Fixed: removed the dead `RetryableThrottling` custom back-off (`_invoke_with_backoff` → single-call `_invoke_handler`); HTTP 429 is handled solely by the azure-core retry policy, configured via `retry_total`/`retry_backoff_max` on the ARM clients in `runtime`. NFR-005 note updated; throttle unit tests replaced with a config-shape assertion. | Kiro |
+| 2026-10-03 | M4 | Fixed: set `AzureWebJobsStorage__accountName`/`__credential=managedidentity`/`__clientId` and added Storage Queue + Table Data Contributor roles for the identity (timer singleton lease + schedule monitor with shared keys disabled). Live timer-fires check remains for T-602. | Kiro |
+| 2026-10-03 | M6 | Fixed: deleted `config/settings.json` (never read; its values had drifted). `var.settings` (from terraform.tfvars) is the single source of truth; updated IAC-004, README layout, and the app_config variable/locals descriptions. | Kiro |
+| 2026-10-03 | M7 | Fixed: `deploy.sh apply` now requires a fresh saved plan (errors with "run plan first" if missing), applies it, and deletes it afterwards so a later apply cannot reuse a stale plan. `bash -n` passes. | Kiro |
+| 2026-10-03 | L1 | Fixed: removed the unused `azuread` provider from `providers.tf` (noted it returns in phase 2 for the on-demand endpoint); IAC-005 updated. | Kiro |
+| 2026-10-03 | L2 | Fixed: RBAC module validates `in_scope_management_group_ids` (rejects the Tenant Root GUID MG and any `platform_management_group_ids`, wired from `excluded_scope_ids`) and sets `principal_type = "ServicePrincipal"` on all identity role assignments (rbac, app_config, function_app). Both validations proven to fire offline. | Kiro |
+| 2026-10-03 | L3 | Fixed: timer uses the `schedule="%RECONCILE_SCHEDULE%"` binding expression instead of reading `os.environ` at import; `pwrsched:reconcileSchedule` documented as informational (not consumed by the trigger). | Kiro |
+| 2026-10-03 | L4 | Fixed: `function_app.py` imports `DEFAULT_ORDER_BY_HANDLER` from `handlers.base`; the duplicated `_DEFAULT_ORDER` map is gone. | Kiro |
+| 2026-10-03 | L5 | Fixed: `ruff check src tests` passes (E/F/W, config in `ruff.toml`); added a **Ruff lint** CI job and documented the local command in VERIFICATION.md. | Kiro |
+| 2026-10-03 | L6 | Fixed: documented that `config/profiles/` is shared across tenants (README "Multiple Tenants") with per-tenant dirs as a future enhancement; added a PHASE1_TASKS progress-log entry recording that the review fixes resolve the defects behind T-202/T-302/T-404/T-501/T-502. | Kiro |
+| 2026-10-03 | Summary | **21 of 22 findings closed** at the code/static level (pytest 126 passed/7 skipped; ruff clean; `terraform fmt`/`validate` pass). The remaining work is **live-deployment verification** (T-602 dry run, T-603 go-live), which needs Azure access and the real OI-01 scope values. | Kiro |

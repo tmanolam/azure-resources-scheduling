@@ -18,7 +18,7 @@ if _SRC not in sys.path:
 from engine import telemetry  # noqa: E402
 from engine.evaluator import parse_profile  # noqa: E402
 from engine.models import ActionType, PlannedAction, ResourceRecord  # noqa: E402
-from engine.reconcile import ReconcileConfig, RetryableThrottling, run_reconcile  # noqa: E402
+from engine.reconcile import ReconcileConfig, run_reconcile  # noqa: E402
 from engine.selection import SelectionResult  # noqa: E402
 
 BKK = ZoneInfo("Asia/Bangkok")
@@ -73,12 +73,23 @@ def captured(caplog):
 
 
 def _dims(records, event):
-    """Return list of custom_dimensions dicts for a given event."""
+    """Return list of attribute dicts (short keys) for a given event.
+
+    H1: telemetry now emits flat ``pwrsched.<field>`` attributes via ``extra``,
+    which logging stores on the record's ``__dict__`` under the dotted key. This
+    helper strips the ``pwrsched.`` prefix so the field-contract assertions below
+    read naturally and still mirror what lands in ``customDimensions``.
+    """
+    prefix = telemetry.ATTR_PREFIX
     out = []
     for r in records:
-        cd = getattr(r, "custom_dimensions", None)
-        if cd and cd.get("event") == event:
-            out.append(cd)
+        attrs = {
+            k[len(prefix):]: v
+            for k, v in r.__dict__.items()
+            if isinstance(k, str) and k.startswith(prefix)
+        }
+        if attrs.get("event") == event:
+            out.append(attrs)
     return out
 
 
