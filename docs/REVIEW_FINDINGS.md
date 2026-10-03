@@ -4,10 +4,10 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-REVIEW-001 |
 | Related | [REQUIREMENTS.md](REQUIREMENTS.md) (v0.4), [PHASE1_TASKS.md](PHASE1_TASKS.md), [VERIFICATION.md](VERIFICATION.md) |
-| Reviewed commit | `f081718` (main) |
+| Reviewed commit | Round 1: `f081718` · Round 2 (re-review of fixes): `014300e` (PR #1, fix commit `65b6a1e`) |
 | Review date | 2026-10-03 |
 | Scope | `src/`, `infra/`, `config/`, `tests/`, `.github/workflows/ci.yml`, docs |
-| Overall verdict | **Code/static fixes complete (21/22 findings closed).** All Critical, High, Medium and Low items are resolved and verified offline (pytest 126 passed/7 skipped; ruff clean; `terraform fmt`/`validate` pass). Remaining before go-live: **live-deployment verification** — T-602 (dry run) and T-603 (go-live), which require Azure access and the real OI-01 scope values. |
+| Overall verdict | **Round 2: OK to proceed to T-602 (dry run); fix N1 and N2 before T-603 (go-live).** 19 of the 22 round-1 findings are closed and verified in code; C1 is reopened because its fail-safe does not work against real Resource Graph output (N1); H1 and M4 are fixed in code but need live verification in T-602. Round 2 added 7 findings (N1–N7). Re-run with pinned SDKs: pytest 133 passed, ruff clean. |
 
 > **How to use this document:** Each finding has an ID, severity, location, evidence, a recommended fix and acceptance criteria. When a finding is fixed, update its **Status**, fill in **Resolved in** (commit or PR) and add a line to the [Status log](#status-log). Do not delete findings; mark them `Closed` or `Won't fix` with a reason.
 
@@ -21,30 +21,44 @@
 
 | ID | Severity | Title | Requirements affected | Status | Resolved in |
 |---|---|---|---|---|---|
-| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | ✅ Closed | discovery/selection/RBAC fix (local) |
-| C2 | Critical | Resource group and subscription tags are ignored | FR-013, FR-025, US-06 | ✅ Closed | discovery `resourcecontainers` join (local) |
-| C3 | Critical | SQL Managed Instance handler cannot start or stop | §8.1 `sqlmi`, D-04 | ✅ Closed | `azure-mgmt-sql==4.0.0` + surface test (local) |
-| H1 | High | Decision data probably does not reach Application Insights | OBS-001, OBS-002, OBS-003–005 | ✅ Closed | OTel flat attributes + KQL aligned (local) |
-| H2 | High | Cycle-health alert can never fire | OBS-003 | ✅ Closed | measure column + Total; +exceptions alert (local) |
-| H3 | High | Handler skips are counted as failures and retried | HR-001, HR-004, OBS-004 | ✅ Closed | explicit HandlerSkip → skipped (local) |
-| H4 | High | Powered-off (not deallocated) VMs are never deallocated | HR-001, OBJ-01 | ✅ Closed | STOPPED_ALLOCATED state + transitions (local) |
-| H5 | High | Private networking option breaks the deployment | SEC-007 | ✅ Closed | validation rejects `true` (local) |
-| H6 | High | Fixed resource names will collide globally | NFR-010 | ✅ Closed | `random_string` in global names (local) |
-| M1 | Medium | Cycle will exceed the 5-minute timeout at scale | NFR-002, NFR-005 | ✅ Closed | Resource Graph power state (local) |
-| M2 | Medium | Subscription/RG include scopes and nested MG excludes don't work | FR-010, FR-011 | ✅ Closed | scope split + mg_chain exclude (local) |
-| M3 | Medium | Custom 429 back-off is dead code | NFR-005 | ✅ Closed | rely on azure-core retry (local) |
-| M4 | Medium | Host storage connection for the timer not explicitly configured | FR-007, NFR-004, SEC-001 | ✅ Closed | AzureWebJobsStorage identity conn (local) |
-| M5 | Medium | `succeeded` is treated as a Running power state | FR-004 | ✅ Closed | removed from Running set (with H4, local) |
-| M6 | Medium | `config/settings.json` is not used by Terraform | IAC-004 | ✅ Closed | deleted; tfvars is sole source (local) |
-| M7 | Medium | `deploy.sh apply` fails without a plan and reuses stale plans | IAC-007 | ✅ Closed | apply requires+deletes plan (local) |
-| L1 | Low | `azuread` provider declared but unused | IAC-005 | ✅ Closed | removed provider (local) |
-| L2 | Low | RBAC module lacks scope validation and `principal_type` | SEC-003, R-01 | ✅ Closed | validation + principal_type (local) |
-| L3 | Low | Timer schedule read from environment at import time | FR-001 | ✅ Closed | binding expr; key informational (local) |
-| L4 | Low | Default order map duplicated | HR-005 | ✅ Closed | single source in handlers.base (local) |
-| L5 | Low | Lint issues; no linter in CI | — | ✅ Closed | ruff clean + CI job + ruff.toml (local) |
-| L6 | Low | Task log overstates completion; profiles shared across tenants | — | ✅ Closed | docs updated (local) |
+| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | 🔴 Reopened → N1 | discovery/selection/RBAC fix · `65b6a1e` (PR #1) |
+| C2 | Critical | Resource group and subscription tags are ignored | FR-013, FR-025, US-06 | ✅ Closed | discovery `resourcecontainers` join · `65b6a1e` (PR #1) |
+| C3 | Critical | SQL Managed Instance handler cannot start or stop | §8.1 `sqlmi`, D-04 | ✅ Closed | `azure-mgmt-sql==4.0.0` + surface test · `65b6a1e` (PR #1) |
+| H1 | High | Decision data probably does not reach Application Insights | OBS-001, OBS-002, OBS-003–005 | 🔍 Fixed, verify in T-602 | OTel flat attributes + KQL aligned · `65b6a1e` (PR #1) |
+| H2 | High | Cycle-health alert can never fire | OBS-003 | ✅ Closed | measure column + Total; +exceptions alert · `65b6a1e` (PR #1) |
+| H3 | High | Handler skips are counted as failures and retried | HR-001, HR-004, OBS-004 | ✅ Closed | explicit HandlerSkip → skipped · `65b6a1e` (PR #1) |
+| H4 | High | Powered-off (not deallocated) VMs are never deallocated | HR-001, OBJ-01 | ✅ Closed | STOPPED_ALLOCATED state + transitions · `65b6a1e` (PR #1) |
+| H5 | High | Private networking option breaks the deployment | SEC-007 | ✅ Closed | validation rejects `true` · `65b6a1e` (PR #1) |
+| H6 | High | Fixed resource names will collide globally | NFR-010 | ✅ Closed | `random_string` in global names · `65b6a1e` (PR #1) |
+| M1 | Medium | Cycle will exceed the 5-minute timeout at scale | NFR-002, NFR-005 | ✅ Closed (follow-up N7) | Resource Graph power state · `65b6a1e` (PR #1) |
+| M2 | Medium | Subscription/RG include scopes and nested MG excludes don't work | FR-010, FR-011 | ✅ Closed | scope split + mg_chain exclude · `65b6a1e` (PR #1) |
+| M3 | Medium | Custom 429 back-off is dead code | NFR-005 | ✅ Closed | rely on azure-core retry · `65b6a1e` (PR #1) |
+| M4 | Medium | Host storage connection for the timer not explicitly configured | FR-007, NFR-004, SEC-001 | 🔍 Fixed, verify in T-602 | AzureWebJobsStorage identity conn · `65b6a1e` (PR #1) |
+| M5 | Medium | `succeeded` is treated as a Running power state | FR-004 | ✅ Closed | removed from Running set (with H4) · `65b6a1e` (PR #1) |
+| M6 | Medium | `config/settings.json` is not used by Terraform | IAC-004 | ✅ Closed | deleted; tfvars is sole source · `65b6a1e` (PR #1) |
+| M7 | Medium | `deploy.sh apply` fails without a plan and reuses stale plans | IAC-007 | ✅ Closed | apply requires+deletes plan · `65b6a1e` (PR #1) |
+| L1 | Low | `azuread` provider declared but unused | IAC-005 | ✅ Closed | removed provider · `65b6a1e` (PR #1) |
+| L2 | Low | RBAC module lacks scope validation and `principal_type` | SEC-003, R-01 | ✅ Closed | validation + principal_type · `65b6a1e` (PR #1) |
+| L3 | Low | Timer schedule read from environment at import time | FR-001 | ✅ Closed | binding expr; key informational · `65b6a1e` (PR #1) |
+| L4 | Low | Default order map duplicated | HR-005 | ✅ Closed | single source in handlers.base · `65b6a1e` (PR #1) |
+| L5 | Low | Lint issues; no linter in CI | — | ✅ Closed | ruff clean + CI job + ruff.toml · `65b6a1e` (PR #1) |
+| L6 | Low | Task log overstates completion; profiles shared across tenants | — | ✅ Closed | docs updated · `65b6a1e` (PR #1) |
 
-**Counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total, 21 closed** (only live-deploy verification T-602/T-603 remains)
+**Round 1 counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total: 19 closed, 2 fixed pending live verification (H1, M4), 1 reopened (C1 → N1)**
+
+### Round 2 summary (re-review of `014300e`)
+
+| ID | Severity | Title | Related | Status | Resolved in |
+|---|---|---|---|---|---|
+| N1 | High | Production fail-safe never triggers on real Resource Graph output | C1, BR-003 | 🔴 Open | |
+| N2 | Medium | SDK surface test is skipped in CI | C3 | 🔴 Open | |
+| N3 | Medium | Telemetry may not be flushed before the invocation ends | H1, OBS-002, OBS-003 | 🔍 Needs verification | |
+| N4 | Low | Resource group join may be case-sensitive | C2, FR-013 | 🔍 Needs verification | |
+| N5 | Low | Production tag key matched case-sensitively | BR-003, A-08 | 🔴 Open | |
+| N6 | Low | Boolean attributes may log as `True`/`False` | H1, OBS-001 | 🔍 Needs verification | |
+| N7 | Low | `max_parallel_arm_calls` still unused | M1, NFR-005 | 🔴 Open | |
+
+**Round 2 counts:** 1 High · 2 Medium · 4 Low · **7 total, 0 closed**. Fix N1 and N2 before T-603.
 
 ---
 
@@ -55,7 +69,7 @@
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Status** | ✅ Closed |
+| **Status** | 🔴 Reopened in round 2: main fix verified; fail-safe defective — see [N1](#n1--production-fail-safe-never-triggers-on-real-resource-graph-output) |
 | **Location** | `src/engine/discovery.py` (`build_kql_query`, `_row_to_record`); `src/engine/selection.py` (BR-003 check); `infra/modules/rbac/main.tf` |
 | **Requirements** | BR-003, US-07, A-08 |
 
@@ -131,7 +145,7 @@
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | ✅ Closed |
+| **Status** | 🔍 Fixed in `65b6a1e`; confirm records and attributes in a live `traces` query during T-602 (see also N3, N6) |
 | **Location** | `src/engine/telemetry.py`; README Step 6 query; `docs/VERIFICATION.md`; `infra/modules/monitoring/main.tf` (all three alerts) |
 | **Requirements** | OBS-001, OBS-002, OBS-003, OBS-004, OBS-005 |
 
@@ -262,7 +276,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | ✅ Closed |
+| **Status** | ✅ Closed (follow-up [N7](#n7--max_parallel_arm_calls-still-unused)) |
 | **Location** | `src/engine/reconcile.py` (`plan_actions`, `execute_actions`); `src/host.json` (`functionTimeout`) |
 | **Requirements** | NFR-002, NFR-005 |
 
@@ -323,7 +337,7 @@
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Status** | ✅ Closed |
+| **Status** | 🔍 Fixed in `65b6a1e`; confirm the timer fires and past-due recovery works during T-602 |
 | **Location** | `infra/modules/function_app/main.tf` (`app_settings`) |
 | **Requirements** | FR-007, NFR-004, SEC-001 |
 
@@ -454,6 +468,152 @@ Ruff reports ~110 findings (unused imports, unused `noqa`, unused variables, roo
 
 ---
 
+## Round 2 findings (re-review of `014300e`)
+
+Reviewed 2026-10-03 against the fix commit `65b6a1e` (PR #1). Each finding below was reproduced locally unless marked 🔍.
+
+### N1 — Production fail-safe never triggers on real Resource Graph output
+
+| | |
+|---|---|
+| **Severity** | High |
+| **Status** | 🔴 Open |
+| **Location** | `src/engine/discovery.py` (`_row_to_record`, `build_kql_query`); `tests/test_discovery.py` |
+| **Related** | C1, BR-003, US-07 |
+
+**Description.** `_row_to_record` sets `subscription_seen = ("subscriptionTags" in row) or ("mgChain" in row)`, i.e. it tests whether the **keys exist**. With a `leftouter` join, Resource Graph returns every projected column; when no subscription row matched, `subscriptionTags` and `mgChain` are present with `null` values. The keys therefore always exist, `subscription_container_seen` is always `True`, and the C1 fail-safe can never fire. The unit test for the fail-safe removes the keys entirely, a shape Resource Graph does not return.
+
+The primary production check still works when the subscription row is readable (the role now includes `Microsoft.Resources/subscriptions/read`), but the safety net for BR-003 fails **open**.
+
+**Evidence.** A row with `"subscriptionTags": null, "mgChain": null` (no own subscription tag data) → `subscription_container_seen=True` → selection result `(eligible=True, reason='eligible')`.
+
+**Recommended fix.**
+- Project the subscription join key (e.g. `subId`) and set `subscription_seen = row.get("subId") is not None` (or `isnotnull(subId)` in KQL).
+- Change the fail-safe test to use `null`-valued keys, and keep one test with the keys absent.
+
+**Acceptance criteria.**
+- [ ] Row with `subId: null` → `subscription-tags-unavailable`, not eligible.
+- [ ] Row with `subId` set and `subscriptionTags: {"environment": "prod"}` → `production-excluded`.
+- [ ] C1 status returned to Closed once this is fixed.
+
+---
+
+### N2 — SDK surface test is skipped in CI
+
+| | |
+|---|---|
+| **Severity** | Medium |
+| **Status** | 🔴 Open |
+| **Location** | `.github/workflows/ci.yml` (`python-tests` job); `tests/test_sdk_surface.py` |
+| **Related** | C3 (acceptance criterion "passes in CI") |
+
+**Description.** The CI test job installs only `pytest` and `tzdata`. `test_sdk_surface.py` skips each check when its SDK package is missing, so in CI all 7 checks are skipped and a bad SDK pin would pass. The test's docstring says CI installs `requirements.txt`; it does not.
+
+**Evidence.** In a fresh environment with only `pytest` and `tzdata`: `7 skipped`. With `src/requirements.txt` installed: all pass.
+
+**Recommended fix.**
+- Add a CI job (or step) that installs `src/requirements.txt` and runs `tests/test_sdk_surface.py`.
+- In that job, fail on skips (e.g. an environment variable the test reads to turn skips into failures, or `pytest -rs` plus a check that nothing was skipped).
+
+**Acceptance criteria.**
+- [ ] CI log shows 7 passed (0 skipped) for `test_sdk_surface.py`.
+- [ ] Temporarily pinning `azure-mgmt-sql==3.0.1` on a branch makes CI fail.
+
+---
+
+### N3 — Telemetry may not be flushed before the invocation ends
+
+| | |
+|---|---|
+| **Severity** | Medium |
+| **Status** | 🔍 Needs verification |
+| **Location** | `src/observability.py`; `src/function_app.py` (`reconcile`) |
+| **Related** | H1, OBS-002, OBS-003 |
+
+**Description.** The Azure Monitor OpenTelemetry distro exports log records in background batches. If the Flex Consumption instance is scaled in or frozen soon after a cycle, the final batch (including the `pwrsched.summary` record) can be lost. Missing summaries would also trip the cycle-health alert falsely.
+
+Separately, records from the `pwrsched` loggers are also forwarded by the Functions host, so `traces` will hold a second copy without the `pwrsched.*` attributes. All queries filter on `customDimensions["pwrsched.event"]`, so they are unaffected; this is noted for anyone reading raw traces.
+
+**Recommended fix.** At the end of each invocation (in a `finally`), call `force_flush()` on the OpenTelemetry logger provider (e.g. `opentelemetry._logs.get_logger_provider().force_flush(timeout_millis=...)`, guarded so failures never break the cycle).
+
+**Acceptance criteria.**
+- [ ] During T-602, every cycle's `pwrsched.summary` record appears in `traces` (count matches the number of invocations over a few hours).
+
+---
+
+### N4 — Resource group join may be case-sensitive
+
+| | |
+|---|---|
+| **Severity** | Low |
+| **Status** | 🔍 Needs verification |
+| **Location** | `src/engine/discovery.py` (`build_kql_query`) |
+| **Related** | C2, FR-013 |
+
+**Description.** The join lowercases the right side (`rgName = tolower(name)`) but compares it with the Resources table's `resourceGroup` unchanged. If any resource row carries a mixed-case resource group name, its RG tags (profile and overrides) are silently missing for that resource.
+
+**Recommended fix.** Lowercase both sides, e.g. `| extend rgKey = tolower(resourceGroup)` before the join and join on `rgKey`.
+
+**Acceptance criteria.**
+- [ ] KQL lowercases both join keys; a unit test asserts it.
+- [ ] During T-602, a resource in a mixed-case RG inherits the RG's `schedule-profile`.
+
+---
+
+### N5 — Production tag key matched case-sensitively
+
+| | |
+|---|---|
+| **Severity** | Low |
+| **Status** | 🔴 Open |
+| **Location** | `src/engine/selection.py` (BR-003 check) |
+| **Related** | BR-003, A-08 |
+
+**Description.** Azure tag names are case-insensitive, but the check reads `subscription_tags.get("environment")` exactly. A subscription tagged `Environment=prod` would not be excluded. The A-08 policy should enforce the exact key, but this is the most important safety rule and should not depend on it.
+
+**Recommended fix.** Look up the key case-insensitively (normalise subscription tag keys to lower case before the check).
+
+**Acceptance criteria.**
+- [ ] Tests: `Environment=prod` and `ENVIRONMENT=Prod` → `production-excluded`.
+
+---
+
+### N6 — Boolean attributes may log as `True`/`False`
+
+| | |
+|---|---|
+| **Severity** | Low |
+| **Status** | 🔍 Needs verification |
+| **Location** | `src/engine/telemetry.py`; README Step 6; `docs/VERIFICATION.md` |
+| **Related** | H1, OBS-001 |
+
+**Description.** Python booleans exported as OpenTelemetry attributes may be stored in `customDimensions` as the strings `True`/`False`. The README and VERIFICATION checklists expect `dryRun` to read `true`; any future query comparing `== "true"` would miss.
+
+**Recommended fix.** Check the stored value during T-602. Either emit booleans as lowercase strings in `_attrs`, or document the actual casing and compare with `tolower()` in queries.
+
+**Acceptance criteria.**
+- [ ] Docs and any queries match the casing observed in T-602.
+
+---
+
+### N7 — `max_parallel_arm_calls` still unused
+
+| | |
+|---|---|
+| **Severity** | Low |
+| **Status** | 🔴 Open |
+| **Location** | `src/engine/reconcile.py` (`ReconcileConfig`) |
+| **Related** | M1, NFR-005 |
+
+**Description.** M1's acceptance criterion was "`max_parallel_arm_calls` is used, or removed". It is kept, with a comment saying it bounds a thread pool, but no thread pool exists; fallback `get_state` calls (e.g. every VM scale set, which has no power state in Resource Graph) still run sequentially.
+
+**Recommended fix.** Either use it (bounded `ThreadPoolExecutor` for fallback reads) or remove the field and the comment.
+
+**Acceptance criteria.**
+- [ ] The field is used by code covered by a test, or removed.
+
+---
+
 ## Status log
 
 | Date | Finding(s) | Change | By |
@@ -480,3 +640,8 @@ Ruff reports ~110 findings (unused imports, unused `noqa`, unused variables, roo
 | 2026-10-03 | L5 | Fixed: `ruff check src tests` passes (E/F/W, config in `ruff.toml`); added a **Ruff lint** CI job and documented the local command in VERIFICATION.md. | Kiro |
 | 2026-10-03 | L6 | Fixed: documented that `config/profiles/` is shared across tenants (README "Multiple Tenants") with per-tenant dirs as a future enhancement; added a PHASE1_TASKS progress-log entry recording that the review fixes resolve the defects behind T-202/T-302/T-404/T-501/T-502. | Kiro |
 | 2026-10-03 | Summary | **21 of 22 findings closed** at the code/static level (pytest 126 passed/7 skipped; ruff clean; `terraform fmt`/`validate` pass). The remaining work is **live-deployment verification** (T-602 dry run, T-603 go-live), which needs Azure access and the real OI-01 scope values. | Kiro |
+| 2026-10-03 | All (round 2) | Re-review of `014300e` (fix commit `65b6a1e`, PR #1) with pinned SDKs installed: pytest 133 passed, ruff clean. 19 findings confirmed closed. Added N1–N7. | Claude |
+| 2026-10-03 | C1 | Reopened: main fix (resourcecontainers join, `subscriptions/read`) verified; fail-safe defective because null-valued join columns are treated as "seen" — tracked as N1. | Claude |
+| 2026-10-03 | H1, M4 | Status changed from Closed to Fixed, pending verification: acceptance criteria require a live deployment (T-602). | Claude |
+| 2026-10-03 | M1 | Closed with follow-up N7 (`max_parallel_arm_calls` unused). | Claude |
+| 2026-10-03 | Summary | "Resolved in" column updated from "(local)" to `65b6a1e` (PR #1). Housekeeping noted: `Azure-Resource-Power-Scheduler.pptx` sits in the repo root (suggest `docs/`), and its status slide still shows round-1 counts. | Claude |
