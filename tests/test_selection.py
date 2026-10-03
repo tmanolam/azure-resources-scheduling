@@ -115,3 +115,29 @@ def test_invalid_order_falls_back_to_default():
     r = _vm(tags={"schedule-profile": "p", "schedule-order": "99"})  # out of 1-9
     s = _one(select_resources([r], enabled_handler_keys=["vm"]))
     assert s.order == 3
+
+
+# --- M2: nested management-group exclusion via mg_chain ----------------------
+
+def _vm_in_chain(chain, **kw):
+    r = _vm(**kw)
+    from dataclasses import replace
+    return replace(r, mg_chain=tuple(c.lower() for c in chain))
+
+
+def test_excluded_child_mg_inside_included_mg():
+    # M2: resource's subscription sits under 'org-sandbox-team' which is a child
+    # of the included 'org-sandbox'; excluding the child MG must exclude it.
+    r = _vm_in_chain(["org", "org-sandbox", "org-sandbox-team"],
+                     tags={"schedule-profile": "p"})
+    s = _one(select_resources([r], enabled_handler_keys=["vm"],
+                              exclude_scopes=["/providers/Microsoft.Management/managementGroups/org-sandbox-team"]))
+    assert s.eligible is False
+    assert s.reason == "excluded-scope"
+
+
+def test_mg_exclude_not_in_chain_is_ignored():
+    r = _vm_in_chain(["org", "org-sandbox"], tags={"schedule-profile": "p"})
+    s = _one(select_resources([r], enabled_handler_keys=["vm"],
+                              exclude_scopes=["/providers/Microsoft.Management/managementGroups/org-platform"]))
+    assert s.eligible is True

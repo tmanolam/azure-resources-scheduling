@@ -14,11 +14,27 @@ from engine.discovery import (  # noqa: E402
     build_kql_query,
     discover_resources,
 )
+from engine.selection import select_resources  # noqa: E402
 
 
-def _row(rid, rtype, sub="s1", rg="rg1", tags=None):
-    return {"id": rid, "type": rtype, "subscriptionId": sub, "resourceGroup": rg,
-            "location": "southeastasia", "tags": tags or {"schedule-profile": "weekday-0830-1730"}}
+def _row(rid, rtype, sub="s1", rg="rg1", tags=None, rg_tags=None, sub_tags=None,
+         with_sub_container=True):
+    """Build a raw Resource Graph row shaped like the joined query output.
+
+    ``with_sub_container=False`` simulates the subscription container row not
+    joining (identity lacks Microsoft.Resources/subscriptions/read) — the
+    ``subscriptionTags``/``mgChain`` keys are absent (C1 fail-safe path).
+    """
+    row = {
+        "id": rid, "type": rtype, "subscriptionId": sub, "resourceGroup": rg,
+        "location": "southeastasia",
+        "tags": tags if tags is not None else {"schedule-profile": "weekday-0830-1730"},
+        "resourceGroupTags": rg_tags or {},
+    }
+    if with_sub_container:
+        row["subscriptionTags"] = sub_tags or {}
+        row["mgChain"] = []
+    return row
 
 
 def test_build_kql_includes_only_enabled_types():
@@ -27,6 +43,38 @@ def test_build_kql_includes_only_enabled_types():
     assert "microsoft.containerservice/managedclusters" in q
     assert "microsoft.dbformysql/flexibleservers" not in q
     assert "schedule-profile" in q  # opt-in pre-filter
+
+
+def test_build_kql_joins_resourcecontainers_for_inherited_tags():
+    # C1/C2: the query must join resourcecontainers and project the inherited
+    # tag maps, and resolve opt-in across resource/RG/subscription via coalesce.
+    q = build_kql_query(["vm"])
+    assert "ResourceContainers" in q
+    assert "microsoft.resources/subscriptions/resourcegroups" in q
+    assert "microsoft.resources/subscriptions" in q
+    assert "resourceGroupTags" in q
+    assert "subscriptionTags" in q
+    assert "coalesce(" in q
+    assert "mgChain" in q
+
+
+def test_build_kql_projects_power_state():
+    # M1: planning reads actual state from Resource Graph, so the query must
+    # project a coalesced powerState across the type-specific properties.
+    q = build_kql_query(["vm", "aks", "postgres-flex", "appgw"])
+    assert "powerState" in q
+    assert "instanceView.powerState.code" in q   # vm
+    assert "properties.powerState.code" in q      # aks
+    assert "properties.state" in q                # db/sqlmi
+    assert "properties.operationalState" in q     # appgw
+
+
+def test_discovery_populates_power_state():
+    row = _row(_VM_RID, _VM_TYPE)
+    row["powerState"] = "PowerState/running"
+    recs = discover_resources(lambda q, s, t: QueryPage([row], None),
+                              include_scopes=["mg"], enabled_handler_keys=["vm"])
+    assert recs[0].power_state == "running"  # prefix stripped
 
 
 def test_discover_single_page():
@@ -69,3 +117,92 @@ def test_discover_skips_unmappable_type():
     recs = discover_resources(lambda q, s, t: QueryPage(rows, None),
                               include_scopes=["mg"], enabled_handler_keys=["vm"])
     assert recs == []
+
+
+# --- C1/C2 end-to-end: discovery populates inherited tags, selection uses them
+
+_VM_RID = "/subscriptions/s1/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
+_VM_TYPE = "Microsoft.Compute/virtualMachines"
+
+
+def _discover_one(row):
+    recs = discover_resources(lambda q, s, t: QueryPage([row], None),
+                              include_scopes=["mg"], enabled_handler_keys=["vm"])
+    assert len(recs) == 1
+    return recs[0]
+
+
+def test_discovery_populates_inherited_tag_maps():
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             sub_tags={"environment": "prod"},
+                             rg_tags={"schedule-profile": "rg-prof"}))
+    assert rec.subscription_tags == {"environment": "prod"}
+    assert rec.resource_group_tags == {"schedule-profile": "rg-prof"}
+    assert rec.subscription_container_seen is True
+
+
+def test_c1_production_excluded_end_to_end_from_raw_row():
+    # C1: a prod-subscription VM with its own profile tag must be excluded once
+    # discovery actually populates subscription_tags from the join.
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={"schedule-profile": "weekday-0830-1730"},
+                             sub_tags={"environment": "prod"}))
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert len(results) == 1
+    assert results[0].eligible is False
+    assert results[0].reason == "production-excluded"
+
+
+def test_c1_fail_safe_when_subscription_container_missing():
+    # C1 fail-safe: subscription row did not join -> ineligible, not assumed safe.
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={"schedule-profile": "weekday-0830-1730"},
+                             with_sub_container=False))
+    assert rec.subscription_container_seen is False
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is False
+    assert results[0].reason == "subscription-tags-unavailable"
+
+
+def test_c2_profile_inherited_from_resource_group_end_to_end():
+    # C2: resource has no own tags; RG supplies the profile -> eligible.
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={},
+                             rg_tags={"schedule-profile": "weekday-0830-1730"}))
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is True
+    assert results[0].profile_name == "weekday-0830-1730"
+
+
+def test_c2_profile_inherited_from_subscription_end_to_end():
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={},
+                             sub_tags={"schedule-profile": "sub-prof"}))
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is True
+    assert results[0].profile_name == "sub-prof"
+
+
+def test_c2_rg_override_tags_visible_end_to_end():
+    # C2 / US-06: override tags set on the RG are now seen by the engine.
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={},
+                             rg_tags={
+                                 "schedule-profile": "weekday-0830-1730",
+                                 "schedule-override-state": "stopped",
+                                 "schedule-override-until": "2026-10-10T21:00+07:00",
+                             }))
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is True
+    assert results[0].override_state == "stopped"
+    assert results[0].override_until == "2026-10-10T21:00+07:00"
+
+
+def test_c2_tag_precedence_resource_over_rg_over_sub_end_to_end():
+    rec = _discover_one(_row(_VM_RID, _VM_TYPE,
+                             tags={"schedule-profile": "res-prof"},
+                             rg_tags={"schedule-profile": "rg-prof"},
+                             sub_tags={"schedule-profile": "sub-prof"}))
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is True
+    assert results[0].profile_name == "res-prof"

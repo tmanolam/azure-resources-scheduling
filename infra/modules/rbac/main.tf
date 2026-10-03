@@ -11,6 +11,10 @@ locals {
   # Base read permissions always required (§11.1).
   base_actions = [
     "Microsoft.Resources/subscriptions/resourceGroups/read",
+    # Required so Resource Graph returns the subscription container row, which
+    # carries the environment=prod tag for the production hard-exclusion and the
+    # inherited schedule tags (BR-003, FR-013, finding C1).
+    "Microsoft.Resources/subscriptions/read",
     "Microsoft.ResourceGraph/resources/read",
   ]
 
@@ -85,4 +89,5 @@ resource "azurerm_role_assignment" "mg" {
   scope              = each.value
   role_definition_id = azurerm_role_definition.operator.role_definition_resource_id
   principal_id       = var.identity_principal_id
+  principal_type     = "ServicePrincipal" # L2: identity may be newly created; avoid propagation races
 }

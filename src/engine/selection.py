@@ -10,6 +10,10 @@ resolving tags and applying the hard safety rules:
 - BR-002  Opt-in only: a resource must resolve a schedule-profile tag.
 - BR-003  Production hard-exclusion: subscription tagged environment=prod is
           always skipped with reason 'production-excluded'. No opt-in exists.
+- C1      Fail-safe: when the subscription container could not be read during
+          discovery (subscription_container_seen=False), the resource is skipped
+          with reason 'subscription-tags-unavailable' rather than assumed
+          non-production.
 
 The output is a list of SelectionResult, each either eligible (with the resolved
 profile name, order and override tags) or skipped (with a reason), so every
@@ -69,22 +73,26 @@ def resolve_effective_tags(resource: ResourceRecord) -> dict[str, str]:
 def _is_under_excluded_scope(resource: ResourceRecord, exclude_scopes: Sequence[str]) -> Optional[str]:
     """Return the matching exclude scope if the resource is under one, else None.
 
-    Matches subscription, resource-group and resource ID scopes by
-    case-insensitive comparison. A scope matches when it equals, or is a path
-    prefix of, the resource ID; the subscription scope ``/subscriptions/<id>``
-    also matches via the resource's subscription ID.
-
-    Management-group exclude scopes cannot be resolved to resources here without
-    MG-membership data, so they are enforced upstream by simply not including
-    that MG in the Resource Graph query (FR-011).
+    Matches three scope kinds (FR-011):
+    - subscription / resource-group / resource ID scopes: by case-insensitive
+      equality or path-prefix against the resource ID (and the subscription ID);
+    - management-group scopes: by checking whether the excluded MG name appears
+      in the resource's subscription ``mg_chain`` (M2), so excluding a child MG
+      inside an included MG now works. When ``mg_chain`` is unavailable, MG
+      exclusion falls back to being enforced by simply not querying that MG.
     """
     rid = resource.resource_id.lower()
     sub_scope = f"/subscriptions/{resource.subscription_id.lower()}"
+    chain = set(resource.mg_chain or ())
     for scope in exclude_scopes:
         s = scope.lower().rstrip("/")
         if not s:
             continue
-        if s.startswith("/subscriptions/"):
+        if "/managementgroups/" in s:
+            mg_name = s.rsplit("/", 1)[-1]
+            if mg_name in chain:
+                return scope
+        elif s.startswith("/subscriptions/"):
             if rid == s or rid.startswith(s + "/") or s == sub_scope:
                 return scope
     return None
@@ -121,6 +129,13 @@ def select_resources(
 
     for r in resources:
         effective = resolve_effective_tags(r)
+
+        # C1 fail-safe: if the subscription container could not be read, we
+        # cannot confirm the resource is non-production (BR-003). Treat it as
+        # ineligible rather than risk acting on a production resource.
+        if not r.subscription_container_seen:
+            results.append(SelectionResult(r, False, "subscription-tags-unavailable"))
+            continue
 
         # BR-003: production hard-exclusion (checked on subscription tags only,
         # which cannot be overridden by resource/RG tags).

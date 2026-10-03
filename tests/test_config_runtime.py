@@ -8,15 +8,12 @@ import os
 import sys
 import types
 
-import pytest
 
 _SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from engine.config import (  # noqa: E402
-    LoadedConfig,
-    Settings,
     load_from_app_configuration,
     parse_config,
 )
@@ -148,3 +145,31 @@ def test_default_client_factories_builds_for_known_keys():
 def test_default_client_factories_skips_unknown_key():
     factories = runtime.default_client_factories(credential=object(), enabled_handler_keys=["vm", "bogus"])
     assert set(factories) == {"vm"}
+
+
+# --- M2: include-scope classification (MG / subscription / RG) ---------------
+
+def test_classify_scopes_splits_by_type():
+    scopes = [
+        "/providers/Microsoft.Management/managementGroups/org-sandbox",
+        "/subscriptions/11111111-1111-1111-1111-111111111111",
+        "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dev",
+    ]
+    mg, subs, rg = runtime._classify_scopes(scopes)
+    assert mg == ["org-sandbox"]
+    # RG scope's parent subscription is included alongside the explicit sub.
+    assert "11111111-1111-1111-1111-111111111111" in subs
+    assert "22222222-2222-2222-2222-222222222222" in subs
+    assert rg == ["22222222-2222-2222-2222-222222222222/rg-dev"]
+
+
+def test_classify_scopes_dedupes_and_skips_garbage():
+    scopes = [
+        "/subscriptions/aaa",
+        "/subscriptions/aaa",            # dup
+        "not-a-scope",                   # skipped
+    ]
+    mg, subs, rg = runtime._classify_scopes(scopes)
+    assert mg == []
+    assert subs == ["aaa"]
+    assert rg == []

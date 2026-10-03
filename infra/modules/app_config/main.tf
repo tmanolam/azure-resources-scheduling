@@ -34,6 +34,7 @@ resource "azurerm_role_assignment" "identity_data_reader" {
   scope                = azurerm_app_configuration.this.id
   role_definition_name = "App Configuration Data Reader"
   principal_id         = var.identity_principal_id
+  principal_type       = "ServicePrincipal" # L2: identity may be newly created
 }
 
 # --- Keys loaded from versioned files (IAC-004) -----------------------------
@@ -45,14 +46,18 @@ locals {
     trimsuffix(f, ".json") => file("${var.config_root}/profiles/${f}")
   }
 
-  # Global settings keys (§6.3). Environment-specific values come from var.settings
-  # so the same config/ files work across dev/prod.
+  # Global settings keys (§6.3). Values come from var.settings (sourced from
+  # terraform.tfvars) — the single source of truth; there is no config/settings.json
+  # (M6). The same config/profiles/ files are shared across tenants.
   setting_values = {
-    "pwrsched:resourceTypes"     = jsonencode(var.settings.enabled_resource_types)
-    "pwrsched:scopes:include"    = jsonencode(var.settings.include_scopes)
-    "pwrsched:scopes:exclude"    = jsonencode(var.settings.exclude_scopes)
-    "pwrsched:dryRun"            = tostring(var.settings.dry_run)
-    "pwrsched:maxActionsPerRun"  = tostring(var.settings.max_actions_per_run)
+    "pwrsched:resourceTypes"    = jsonencode(var.settings.enabled_resource_types)
+    "pwrsched:scopes:include"   = jsonencode(var.settings.include_scopes)
+    "pwrsched:scopes:exclude"   = jsonencode(var.settings.exclude_scopes)
+    "pwrsched:dryRun"           = tostring(var.settings.dry_run)
+    "pwrsched:maxActionsPerRun" = tostring(var.settings.max_actions_per_run)
+    # Informational only: the timer schedule is bound from the RECONCILE_SCHEDULE
+    # app setting via a binding expression, not from this key (L3). Kept so the
+    # schedule is visible/auditable alongside the other settings.
     "pwrsched:reconcileSchedule" = var.settings.reconcile_schedule
   }
 }

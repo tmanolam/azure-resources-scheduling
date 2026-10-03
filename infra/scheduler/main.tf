@@ -7,19 +7,36 @@ locals {
   suffix_sa = var.name_suffix # storage name has no separators
   base      = "pwrsched"
 
+  # H6: Function App hostnames, storage account names and App Configuration
+  # names are globally unique across all of Azure. A short random token keeps
+  # them collision-free across tenants (and re-deployments reuse the same token
+  # because it is stored in Terraform state).
+  rand    = random_string.unique.result
+  rand_sa = local.rand # no separator for storage
+
   rg_name           = "rg-${local.base}${local.suffix}-${local.region}"
   identity_name     = "id-${local.base}${local.suffix}"
-  func_name         = "func-${local.base}${local.suffix}"
+  func_name         = "func-${local.base}${local.suffix}-${local.rand}"
   plan_name         = "plan-${local.base}${local.suffix}"
-  appcs_name        = "appcs-${local.base}${local.suffix}"
+  appcs_name        = "appcs-${local.base}${local.suffix}-${local.rand}"
   appi_name         = "appi-${local.base}${local.suffix}"
   workspace_name    = "log-${local.base}${local.suffix}"
   action_group_name = "ag-${local.base}${local.suffix}"
-  storage_name      = "st${local.base}${local.suffix_sa}" # 3-24 lowercase alphanumerics
+  storage_name      = "st${local.base}${local.suffix_sa}${local.rand_sa}" # 3-24 lowercase alphanumerics
   role_name         = var.name_suffix == "" ? "Resource Power Operator" : "Resource Power Operator - ${var.name_suffix}"
 
   # infra/scheduler/ is two levels under the repo root.
   config_root = "${path.module}/../../config"
+}
+
+# H6: 4-char lowercase-alphanumeric token making globally unique names unique.
+# Kept in state (no keepers) so it is stable across applies for one deployment.
+resource "random_string" "unique" {
+  length  = 4
+  lower   = true
+  upper   = false
+  numeric = true
+  special = false
 }
 
 data "azurerm_client_config" "current" {}
@@ -83,6 +100,8 @@ module "rbac" {
   in_scope_management_group_ids = var.in_scope_management_group_ids
   identity_principal_id         = azurerm_user_assigned_identity.this.principal_id
   enabled_resource_types        = var.enabled_resource_types
+  # Reject any in-scope MG that is also an excluded (e.g. Platform) MG (L2).
+  platform_management_group_ids = var.excluded_scope_ids
 }
 
 module "function_app" {

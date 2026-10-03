@@ -1,0 +1,20 @@
+# Ruff configuration for the Resource Power Scheduler (finding L5).
+# Keeps CI and local linting in agreement. Scope: src/ and tests/.
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+# Default rule set (pyflakes F + pycodestyle E/W): catches unused imports,
+# unused variables, unused noqa and similar hygiene issues (the finding-L5
+# scope). Broader groups (import-sort, bugbear, pyupgrade) can be adopted
+# later; keeping the set focused avoids reformatting churn now.
+select = ["E", "F", "W"]
+ignore = [
+    "E501", # line length is enforced loosely; long KQL/strings are acceptable
+]
+
+[lint.per-file-ignores]
+# Tests manipulate sys.path before importing the package, so module-level
+# imports intentionally occur after code (E402), and fixtures may look unused.
+"tests/*" = ["E402"]

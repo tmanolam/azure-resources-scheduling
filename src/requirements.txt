@@ -14,10 +14,16 @@ azure-mgmt-resourcegraph==8.0.0
 azure-mgmt-compute==33.0.0
 azure-mgmt-containerservice==34.0.0
 azure-mgmt-rdbms==10.1.0
-azure-mgmt-sql==3.0.1
+# azure-mgmt-sql 4.0.0+ exposes ManagedInstancesOperations.begin_start/begin_stop
+# (SQL MI start/stop LROs). 3.0.1 lacked these methods — finding C3.
+azure-mgmt-sql==4.0.0
 azure-mgmt-network==28.0.0
 azure-mgmt-resource==23.1.1
 azure-core==1.32.0
 
 # IANA timezone database for zoneinfo on the Linux Functions runtime (FR-002)
 tzdata==2024.2
+
+# Export structured telemetry (flat pwrsched.* attributes) to Application
+# Insights via OpenTelemetry — OBS-001/002, finding H1.
+azure-monitor-opentelemetry==1.6.4

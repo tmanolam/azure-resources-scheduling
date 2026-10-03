@@ -36,7 +36,13 @@ class VmHandler(BaseHandler):
         for status in getattr(iv, "statuses", None) or []:
             code = getattr(status, "code", "") or ""
             if code.lower().startswith("powerstate/"):
-                return code.split("/", 1)[1]  # e.g. 'running', 'deallocated', 'stopping'
+                state = code.split("/", 1)[1].lower()  # 'running', 'deallocated', 'stopped', ...
+                # 'stopped' = powered off from inside the OS but still allocated
+                # and billed; it must still be deallocated (HR-001, H4). Signal a
+                # distinct state so the engine does not treat it as converged.
+                if state == "stopped":
+                    return "stopped-allocated"
+                return state
         return "unknown"
 
     def _is_ephemeral_os_disk(self, resource: ResourceRecord) -> bool:

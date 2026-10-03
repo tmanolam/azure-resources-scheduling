@@ -381,7 +381,7 @@ Microsoft.Network/applicationGateways/stop/action
 | IAC-001 | All Azure resources, the role definition, role assignments and App Configuration keys shall be defined in Terraform. |
 | IAC-002 | Terraform state shall be stored remotely in an Azure Storage backend with Entra ID authentication (`use_azuread_auth = true`) and state locking. |
 | IAC-003 | The code shall be organised as a single tenant-wide root module (`infra/scheduler`) plus reusable modules: `function_app`, `rbac`, `app_config`, `monitoring`. One scheduler manages the whole tenant's in-scope (non-production) estate. |
-| IAC-004 | Schedule profiles and global settings shall be maintained in versioned files (`config/profiles/*.json`, `config/settings.json`) and loaded into App Configuration by Terraform. |
+| IAC-004 | Schedule profiles shall be maintained in versioned files (`config/profiles/*.json`) and loaded into App Configuration by Terraform. Global settings (§6.3) are maintained as Terraform variables in `terraform.tfvars` (the single source of truth) and written to App Configuration by Terraform; there is no separate `config/settings.json` (finding M6). |
 | IAC-005 | Provider versions shall be pinned (`azurerm ~> 4.x`, `azuread ~> 3.x`, Terraform `>= 1.9`). |
 | IAC-006 | All scheduler resources shall carry standard tags: `owner`, `cost-centre`, `project`, `managed-by=terraform`. (The `environment=prod` tag on *workload* subscriptions drives the production hard-exclusion, BR-003, and is separate from these.) |
 | IAC-007 | Function code shall be packaged as a zip and deployed after infrastructure creation using the documented CLI command (see README). |

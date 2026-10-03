@@ -124,6 +124,29 @@ def test_vm_ephemeral_os_disk_skipped_on_stop():
     assert ops.calls == []  # HR-001: never deallocated
 
 
+def test_vm_stopped_maps_to_stopped_allocated():
+    # H4: PowerState/stopped (OS-level shutdown, still billed) must be reported
+    # as a distinct state that normalises to STOPPED_ALLOCATED, so the engine
+    # deallocates it rather than treating it as converged.
+    ops = FakeVmOps(power="stopped")
+    h = VmHandler(lambda s: _vm_client(ops))
+    rec = _rec(_rid("Microsoft.Compute", "virtualMachines", "vm1"), "vm", "Microsoft.Compute/virtualMachines")
+    assert h.get_state(rec) == "stopped-allocated"
+    assert _normalise_actual(h.get_state(rec)) is ActualState.STOPPED_ALLOCATED
+
+
+def test_vm_deallocated_maps_to_stopped():
+    ops = FakeVmOps(power="deallocated")
+    h = VmHandler(lambda s: _vm_client(ops))
+    rec = _rec(_rid("Microsoft.Compute", "virtualMachines", "vm1"), "vm", "Microsoft.Compute/virtualMachines")
+    assert _normalise_actual(h.get_state(rec)) is ActualState.STOPPED
+
+
+def test_normalise_succeeded_is_unknown_not_running():
+    # M5: 'Succeeded' is a provisioning state, not a power state.
+    assert _normalise_actual("Succeeded") is ActualState.UNKNOWN
+
+
 # --- VMSS --------------------------------------------------------------------
 
 def test_vmss_start_and_state():

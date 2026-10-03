@@ -30,7 +30,11 @@ class VmssHandler(BaseHandler):
         for status in getattr(iv, "statuses", None) or []:
             code = getattr(status, "code", "") or ""
             if code.lower().startswith("powerstate/"):
-                return code.split("/", 1)[1]
+                state = code.split("/", 1)[1].lower()
+                # Powered off but still allocated/billed => must be deallocated (H4).
+                if state == "stopped":
+                    return "stopped-allocated"
+                return state
         return "unknown"
 
     def start(self, resource: ResourceRecord) -> None:

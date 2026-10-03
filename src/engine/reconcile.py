@@ -54,22 +54,28 @@ class Handler(Protocol):
     def stop(self, resource: ResourceRecord) -> None: ...
 
 
-class RetryableThrottling(Exception):
-    """Raised by a handler/transport to signal HTTP 429 with a Retry-After hint."""
-
-    def __init__(self, retry_after_seconds: float = 1.0):
-        super().__init__("throttled")
-        self.retry_after_seconds = retry_after_seconds
-
-
 @dataclass(frozen=True)
 class ReconcileConfig:
     """Runtime configuration for a cycle (loaded from App Configuration)."""
 
     dry_run: bool = True
     max_actions_per_run: int = 200
+    # Bounds the thread pool used to read/confirm actual state via ARM (M1).
     max_parallel_arm_calls: int = 10
-    max_throttle_retries: int = 3
+
+
+@dataclass(frozen=True)
+class InvokeOutcome:
+    """Result of invoking a handler start/stop (H3).
+
+    Exactly one of these states applies:
+    - ``submitted`` True: the operation was submitted;
+    - ``skip_reason`` set: the handler raised HandlerSkip (skip, no retry);
+    - both falsy: a genuine failure.
+    """
+
+    submitted: bool = False
+    skip_reason: Optional[str] = None
 
 
 @dataclass
@@ -88,24 +94,61 @@ class CycleSummary:
 
 
 def _desired_to_action(desired: DesiredState, actual: ActualState) -> ActionType:
-    """Map (desired, actual) to the action needed, or NONE if already converged (FR-004)."""
-    if desired is DesiredState.RUNNING and actual is ActualState.STOPPED:
+    """Map (desired, actual) to the action needed, or NONE if already converged (FR-004).
+
+    STOPPED_ALLOCATED (a VM/VMSS powered off from inside the OS but still
+    allocated and billed) is treated as "not yet converged" when the desired
+    state is Stopped: it must be deallocated to actually save cost (H4).
+    """
+    if desired is DesiredState.RUNNING and actual in (ActualState.STOPPED, ActualState.STOPPED_ALLOCATED):
         return ActionType.START
-    if desired is DesiredState.STOPPED and actual is ActualState.RUNNING:
+    if desired is DesiredState.STOPPED and actual in (ActualState.RUNNING, ActualState.STOPPED_ALLOCATED):
         return ActionType.STOP
     return ActionType.NONE
 
 
 def _normalise_actual(text: str) -> ActualState:
-    """Map a handler's raw state text to a normalised ActualState."""
+    """Map a handler's raw state text to a normalised ActualState.
+
+    VM/VMSS handlers report ``stopped-allocated`` for an OS-level shutdown that
+    is still billed (distinct from ``deallocated``), so it maps to
+    STOPPED_ALLOCATED (H4). Database ``Stopped`` means fully stopped → STOPPED.
+    """
+    t = (text or "").strip().lower()
+    if t in {"stopped-allocated", "stoppedallocated"}:
+        return ActualState.STOPPED_ALLOCATED
     if is_transitional(text):
         return ActualState.TRANSITIONAL
-    t = (text or "").strip().lower()
-    if t in {"running", "started", "succeeded", "ready", "resumed", "online"}:
+    if t in {"running", "started", "ready", "resumed", "online"}:
         return ActualState.RUNNING
     if t in {"stopped", "deallocated", "paused", "shutdown", "offline"}:
         return ActualState.STOPPED
     return ActualState.UNKNOWN
+
+
+# Handler keys whose plain 'stopped' power state means "powered off but still
+# allocated/billed" and must be deallocated (H4). For these, a Resource Graph
+# 'stopped' is mapped to 'stopped-allocated' before normalisation.
+_ALLOCATED_WHEN_STOPPED = frozenset({"vm", "vmss"})
+
+
+def _read_actual_state(resource: ResourceRecord, handler: "Handler") -> ActualState:
+    """Determine the actual state, preferring the Resource Graph read (M1).
+
+    When discovery populated ``resource.power_state`` (the common case), no
+    per-resource ARM call is made — this is what keeps a large cycle within the
+    5-minute budget (NFR-002). Only when it is absent do we fall back to the
+    handler's ARM ``get_state``. The handler's ``start``/``stop`` still issues
+    the authoritative ARM operation, so a slightly stale read self-heals next
+    cycle (FR-004).
+    """
+    raw = (resource.power_state or "").strip()
+    if not raw:
+        return _normalise_actual(handler.get_state(resource))
+    # Apply the VM/VMSS billed-while-stopped distinction (H4) to the RG value.
+    if resource.handler_key in _ALLOCATED_WHEN_STOPPED and raw.lower() == "stopped":
+        raw = "stopped-allocated"
+    return _normalise_actual(raw)
 
 
 def plan_actions(
@@ -150,7 +193,7 @@ def plan_actions(
             continue
 
         try:
-            actual = _normalise_actual(handler.get_state(r))
+            actual = _read_actual_state(r, handler)
         except Exception as exc:  # defensive: a read failure must not abort the cycle
             logger.warning("pwrsched.reconcile: get_state failed for %s: %s", r.resource_id, exc)
             planned.append(_none_action(r, "state-read-failed", sel.profile_name, sel.order or 3, decision.warning))
@@ -189,12 +232,18 @@ def execute_actions(
     summary: CycleSummary,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Execute ordered actions, honouring dry-run and 429 back-off.
+    """Execute ordered actions, honouring dry-run.
 
     In dry-run (FR-030) no handler start/stop is called; the intent is counted
     and logged. Submission is asynchronous (FR-005): handlers must not wait for
-    completion. On RetryableThrottling the call is retried up to
-    max_throttle_retries, sleeping for the hinted Retry-After (NFR-005).
+    completion.
+
+    Throttling (NFR-005): HTTP 429 is retried by the Azure SDK's own retry
+    policy (azure-core), honouring the ``Retry-After`` header — see
+    ``runtime.default_client_factories`` which configures ``retry_total`` /
+    ``retry_backoff_max`` on the ARM clients. The engine does not implement a
+    second back-off mechanism (finding M3). ``sleep`` is retained only for
+    backward-compatible call sites and is unused.
     """
     for action in ordering.actions:
         handler = handlers.get(action.resource.handler_key)
@@ -212,9 +261,19 @@ def execute_actions(
             summary.decisions.append(replace(action, result="dry-run"))
             continue
 
-        if _invoke_with_backoff(handler, action, config, sleep):
+        outcome = _invoke_handler(handler, action)
+        if outcome.submitted:
             _count_success(summary, action.action)
             summary.decisions.append(replace(action, result="submitted"))
+        elif outcome.skip_reason is not None:
+            # HR-001/HR-004: handler asked to skip (e.g. ephemeral-OS-disk VM,
+            # HA/replica rejection). Not a failure — do not count as failed and
+            # do not trigger the OBS-004 repeated-failure alert (finding H3).
+            summary.skipped += 1
+            summary.decisions.append(
+                replace(action, result=f"skipped:{outcome.skip_reason}",
+                        warning=action.warning or outcome.skip_reason)
+            )
         else:
             summary.failed += 1
             summary.decisions.append(replace(action, result="failed"))
@@ -226,31 +285,48 @@ def execute_actions(
     summary.cap_reached = ordering.cap_reached
 
 
-def _invoke_with_backoff(handler, action, config, sleep) -> bool:
-    """Invoke the handler start/stop with 429 back-off. Returns True on submit."""
-    attempts = 0
-    while True:
-        try:
-            if action.action is ActionType.START:
-                handler.start(action.resource)
-            elif action.action is ActionType.STOP:
-                handler.stop(action.resource)
-            return True
-        except RetryableThrottling as exc:
-            attempts += 1
-            if attempts > config.max_throttle_retries:
-                logger.error(
-                    "pwrsched.reconcile: giving up on %s after %d throttled attempts",
-                    action.resource.resource_id, attempts,
-                )
-                return False
-            sleep(max(0.0, exc.retry_after_seconds))
-        except Exception as exc:  # noqa: BLE001 — one failure must not abort the cycle
-            logger.error(
-                "pwrsched.reconcile: %s failed for %s: %s",
-                action.action.value, action.resource.resource_id, exc,
+def _invoke_handler(handler, action) -> "InvokeOutcome":
+    """Invoke the handler start/stop once (no custom retry — M3).
+
+    HTTP 429 throttling is retried by the Azure SDK's own retry policy
+    (azure-core), so this does a single call. Returns an :class:`InvokeOutcome`:
+    - ``submitted=True``        — the operation was submitted;
+    - ``skip_reason=<reason>``  — the handler raised HandlerSkip (HR-001/HR-004):
+      not a failure, must not be retried or alerted (H3);
+    - neither                   — a genuine failure (counted as failed).
+    """
+    try:
+        if action.action is ActionType.START:
+            handler.start(action.resource)
+        elif action.action is ActionType.STOP:
+            handler.stop(action.resource)
+        return InvokeOutcome(submitted=True)
+    except Exception as exc:  # noqa: BLE001 — one failure must not abort the cycle
+        reason = _handler_skip_reason(exc)
+        if reason is not None:
+            # HR-001/HR-004: explicit "skip, do not retry" signal (H3).
+            logger.warning(
+                "pwrsched.reconcile: skipping %s %s: %s",
+                action.action.value, action.resource.resource_id, reason,
             )
-            return False
+            return InvokeOutcome(skip_reason=reason)
+        logger.error(
+            "pwrsched.reconcile: %s failed for %s: %s",
+            action.action.value, action.resource.resource_id, exc,
+        )
+        return InvokeOutcome()
+
+
+def _handler_skip_reason(exc: BaseException) -> Optional[str]:
+    """Return the skip reason if ``exc`` is a handler HandlerSkip, else None.
+
+    HandlerSkip is defined in ``handlers.base``. It is matched structurally (by
+    class name and a ``reason`` attribute) so the engine does not import the
+    handlers package, keeping the engine decoupled and SDK-free.
+    """
+    if type(exc).__name__ == "HandlerSkip":
+        return getattr(exc, "reason", None) or (str(exc) or "handler-skip")
+    return None
 
 
 def _count_success(summary: CycleSummary, action: ActionType) -> None:

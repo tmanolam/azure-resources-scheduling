@@ -44,9 +44,19 @@ terraform validate
 
 ### 1.3 CI
 
-The same two checks run automatically on every push / PR to `main` via
-`.github/workflows/ci.yml` (jobs: **Python unit tests**, **Terraform fmt +
-validate**). CI performs **no deployment** and needs no cloud credentials.
+These checks run automatically on every push / PR to `main` via
+`.github/workflows/ci.yml` (jobs: **Python unit tests**, **Ruff lint**, and
+**Terraform fmt + validate**). CI performs **no deployment** and needs no cloud
+credentials.
+
+Run the linter locally the same way CI does (finding L5):
+
+```bash
+python -m pip install ruff==0.12.0
+ruff check src tests        # config in ruff.toml
+```
+
+**Expected:** `All checks passed!`.
 
 ---
 
@@ -128,7 +138,7 @@ Query Application Insights (README Step 6 shows the full KQL):
 APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
 RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
 az monitor app-insights query --app "$APPI" --resource-group "$RG" \
-  --analytics-query 'traces | where customDimensions.event == "pwrsched.decision" | take 50'
+  --analytics-query 'traces | where customDimensions["pwrsched.event"] == "pwrsched.decision" | take 50'
 ```
 
 Verify:

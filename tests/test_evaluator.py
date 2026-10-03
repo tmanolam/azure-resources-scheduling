@@ -27,7 +27,6 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from engine.evaluator import (  # noqa: E402
-    Decision,
     DesiredState,
     Profile,
     ProfileError,
