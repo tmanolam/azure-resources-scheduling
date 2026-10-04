@@ -3,7 +3,7 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-001 |
-| Version | 0.2 |
+| Version | 0.3 |
 | Related | [VERIFICATION.md](VERIFICATION.md), [REQUIREMENTS.md](REQUIREMENTS.md), [../README.md](../README.md) |
 | Created | 2026-10-04 |
 | Audience | Implementer (Kiro), platform team, presenter |
@@ -41,14 +41,7 @@ Tasks in this plan use the prefix **DM-** (`D-` is already used for decisions in
 | `sub-demo-workload-prod` | Production — proves the hard exclusion (C1, N5) | `demo-workload-prod` | `Environment=Prod` (deliberately mixed case, tests N5) |
 | `sub-demo-sandbox` | Subscription-level tag inheritance; nested-MG exclusion | `demo-sandbox` | `environment=sandbox`, `schedule-profile=sandbox-default` |
 
-**Plan A (preferred):** all four subscriptions draw on the credit. Whether a credit offer allows more than one subscription depends on the offer type; check this first (DM-02).
-
-**Plan B (credit covers one subscription only):**
-
-| Plan B subscription | Holds | Notes |
-|---|---|---|
-| Credit subscription | Scheduler **and** all non-prod workloads | Place it in `demo-workload-np`. Exclude the scheduler's own resource group with an RG scope in `excluded_scope_ids`. Sandbox scenarios S3 and S9 use resource groups instead (see §6). |
-| One small Pay-As-You-Go subscription | Only W9 (the prod VM) | Tagged `Environment=Prod`. About USD 10/month, billed outside the credit. Needed for the live C1 check; without it C1 stays verified by unit tests only. |
+All four subscriptions draw on the USD 1,000 credit.
 
 ### 2.2 Management group hierarchy (CAF-lite)
 
@@ -59,8 +52,8 @@ Tenant Root Group
     │   ├── demo-platform-management ........ sub-demo-management
     │   └── demo-platform-connectivity ...... (empty; no hub needed)
     ├── demo-landingzones ................... in_scope_management_group_ids
-    │   └── demo-workload-np ................ sub-demo-workload-dev
-    |   └── demo-workload-prod .............. sub-demo-workload-prod
+    │   ├── demo-workload-np ................ sub-demo-workload-dev
+    │   └── demo-workload-prod .............. sub-demo-workload-prod
     ├── demo-sandbox ........................ in_scope_management_group_ids
     │   └── demo-sandbox-excluded ........... excluded_scope_ids (S9: nested exclude)
     └── demo-decommissioned
@@ -83,6 +76,10 @@ No hub network or firewall is needed: the scheduler talks to Azure Resource Mana
 | `max_actions_per_run` | `200` (temporarily `2` for S14) | Cap test |
 | `location` | `southeastasia` | Close to Bangkok, matches the profiles' timezone |
 
+> **Demo vs. target tenant scoping.** In the demo, `demo-workload-prod` stays **inside** the in-scope `demo-landingzones` group on purpose: the scheduler must discover the prod VM to prove the production tag rule (C1, N5) by logging `production-excluded`. Do **not** add it to `excluded_scope_ids` here.
+>
+> For the **target tenant** (OI-01), use the stricter setup: set `in_scope_management_group_ids` to the non-production workload group only. The custom role is then never assigned above production, so the managed identity has no permissions there; production resources are never discovered; and the tag rule remains as a final safeguard. The trade-off is that the production rule can't be observed in the target tenant, which is why it is proven in the demo.
+
 ---
 
 ## 3. Prerequisites (manual, before Kiro starts)
@@ -90,7 +87,7 @@ No hub network or firewall is needed: the scheduler talks to Azure Resource Mana
 | ID | Step | Notes |
 |---|---|---|
 | DM-01 | **Create the demo tenant** and activate the credit in it | You become Global Administrator. |
-| DM-02 | **Confirm what the credit allows** (Cost Management + Billing): can you create more subscriptions under it, which regions and services are allowed, and is there a spending limit? | Decides Plan A or Plan B (§2.1). A spending limit is useful: if the credit runs out, Azure disables the resources instead of billing you. |
+| DM-02 | **Confirm what the credit allows** (Cost Management + Billing): which regions and services are allowed, and whether there is a spending limit | A spending limit is useful: if the credit runs out, Azure disables the resources instead of billing you. |
 | DM-03 | **Create and rename the subscriptions** per §2.1 | New subscriptions land under Tenant Root until DM-11 moves them. |
 | DM-04 | **Elevate access** (Entra ID → Properties → "Access management for Azure resources" = Yes), then sign out and in | Gives the deployer User Access Administrator at Tenant Root, needed for management groups, the custom role and MG-level role assignments. Turn it off again after deployment (§9). |
 | DM-05 | **Register resource providers** in each subscription | `Microsoft.Compute`, `Microsoft.Network`, `Microsoft.ContainerService`, `Microsoft.DBforPostgreSQL`, `Microsoft.DBforMySQL`, `Microsoft.Sql`, `Microsoft.Web`, `Microsoft.App`, `Microsoft.AppConfiguration`, `Microsoft.Insights`, `Microsoft.OperationalInsights`, `Microsoft.Storage`. Kiro can script this. |
@@ -179,10 +176,12 @@ demo/
 | ID | Task | Definition of done |
 |---|---|---|
 | DM-10 | Management groups per §2.2 | Hierarchy visible in the portal |
-| DM-11 | Place subscriptions in MGs (§2.1, Plan A or B) | Each subscription under its MG |
+| DM-11 | Place subscriptions in MGs (§2.1) | Each subscription under its MG |
 | DM-12 | Subscription tags (§2.1), including `Environment=Prod` on prod and `schedule-profile=sandbox-default` on sandbox | `az tag list --resource-id /subscriptions/<id>` shows them. Use `azapi` (`Microsoft.Resources/tags`) or `az tag update`; azurerm has no first-class subscription tag resource. |
 | DM-13 | Budgets with email alerts at USD 250 / 500 / 750 on the credit subscription(s) | Visible in Cost Management |
 | DM-14 | Outputs: MG and subscription IDs; a script renders `demo/scheduler/demo.tfvars` from them | `demo.tfvars` matches §2.3 |
+
+Optional (DM-15): assign an Azure Policy at `demo-workload-prod` that requires the `environment` tag with value `prod` on subscriptions, modelling assumption A-08 for the target tenant.
 
 ### 5.2 Workloads (Terraform, `demo/workloads/`)
 
@@ -190,7 +189,6 @@ demo/
 |---|---|---|
 | DM-20 | Core workloads W1–W11, exact tags and placement per §4.1 | Resources exist; mixed-case RG name preserved exactly |
 | DM-21 | Toggles `enable_aks`, `enable_appgw`, `enable_sqlmi` (default `false`) | Each deploys and destroys independently |
-| DM-22 | Plan B support: variable to place all non-prod workloads and sandbox scenarios in one subscription using resource groups | Same scenarios runnable with one credit subscription |
 | DM-23 | No public inbound access; SSH key and DB passwords generated, never output | `terraform output` shows no secrets |
 
 ### 5.3 Scheduler deployment
@@ -223,11 +221,11 @@ All times are **Bangkok time** (UTC+7). With the standard profile, transitions h
 |---|---|---|---|---|
 | S1 | Daily schedule | Watch 07:45–08:45 and 17:15–17:45 on a weekday | `action=start` decisions at 08:00 (W7, W8), 08:15 (W12, W13), 08:30 (VMs); `action=stop` at 17:30; all `dryRun=true`; nothing in the Activity Log | H1, N6 |
 | S2 | RG inheritance, mixed-case RG | Any cycle | W2 decisions show `profile=weekday-0830-1730` | N4 |
-| S3 | Subscription inheritance | Any cycle | W10 decisions show `profile=sandbox-default` (Plan B: RG-level tag instead) | — |
+| S3 | Subscription inheritance | Any cycle | W10 decisions show `profile=sandbox-default` | — |
 | S6 | Opt-out | Any cycle | W4 never gets a start/stop decision | — |
 | S7 | Production exclusion | Any cycle | W9 `result=production-excluded` every cycle | C1, N5 |
 | S8 | Platform exclusion | Any cycle | W11 never appears in decision records | — |
-| S9 | Nested MG exclusion | Move `sub-demo-sandbox` into `demo-sandbox-excluded`; after 2–3 cycles move it back (Plan B: add/remove an RG in `excluded_scope_ids` instead) | W10 disappears while excluded, returns after. MG moves can take several minutes to reach Resource Graph | — |
+| S9 | Nested MG exclusion | Move `sub-demo-sandbox` into `demo-sandbox-excluded`; after 2–3 cycles move it back | W10 disappears while excluded, returns after. MG moves can take several minutes to reach Resource Graph | — |
 | S13 | Telemetry health | Leave running ≥ 3 hours | Invocations ≈ summaries (Queries 3, 6); no storage errors (Query 4) | M4, N3 |
 | S15 | Alerts | VERIFICATION §5 tests (outside business hours is fine) | Cycle-health and cycle-exceptions alerts fire and notify | H2 |
 | S16 | Past-due recovery | VERIFICATION §3.4 stop/start test | Past-due run logged after restart | M4 |
@@ -296,14 +294,14 @@ Notes for Kiro:
 
 ## 9. Teardown
 
-1. Set `dry_run = true` on the scheduler (stops all actions within a cycle).
-2. `terraform destroy` in `demo/workloads/` (optional components first: SQL MI, App Gateway, AKS).
-3. **Export the evidence first** if you want to keep it beyond the tenant: run `collect-evidence.sh final`.
+1. **Export the evidence** if you want to keep it beyond the tenant: run `collect-evidence.sh final`.
+2. Set `dry_run = true` on the scheduler (stops all actions within a cycle).
+3. `terraform destroy` in `demo/workloads/` (optional components first: SQL MI, App Gateway, AKS).
 4. `terraform destroy` in `infra/scheduler` with `demo.tfvars`.
 5. `terraform destroy` in `demo/landing-zone/` (subscriptions return to Tenant Root).
 6. Delete the Terraform state storage account if it was demo-only.
 7. Turn off **elevated access** (DM-04).
-8. Cancel the subscriptions when the tenant is no longer needed; a Plan B Pay-As-You-Go subscription keeps billing until cancelled.
+8. Cancel the subscriptions when the tenant is no longer needed.
 
 ---
 
@@ -312,7 +310,6 @@ Notes for Kiro:
 | Risk | Mitigation |
 |---|---|
 | Credit runs out before the demo | Budget alerts (DM-13); W13/W14 only in Phase B; drop W14 first if spend tracks high |
-| Credit offer allows only one subscription | Plan B (§2.1) |
 | Quota too low for B-series VMs or AKS | DM-06 before deployment; request increases early |
 | Transitions only happen at 08:00–08:30 and 17:30 | Plan verification sessions around those times; use overrides for everything else |
 | SQL MI provisioning time and cost | Optional; free offer if eligible; create after T-602 and destroy after S17 |
@@ -328,3 +325,4 @@ Notes for Kiro:
 |---|---|---|
 | 0.1 | 2026-10-04 | Initial plan |
 | 0.2 | 2026-10-04 | No new profiles or product changes: removed the demo-window profile; scenarios now use the real `weekday-0830-1730` / `sandbox-default` windows plus override tags. Demo is logs-only (§8, saved queries). Budget re-planned for a USD 1,000 credit, with Plan B for single-subscription credit offers. Reconcile schedule kept at the 15-minute default. |
+| 0.3 | 2026-10-04 | Management groups and subscriptions renamed to match the target tenant (`demo-workload-np`, `demo-workload-prod`, `sub-demo-workload-*`). Single-subscription fallback (Plan B, DM-22) removed: all four subscriptions use the credit. Added §2.3 note on demo vs. target-tenant scoping and optional DM-15 (prod tag policy). |
