@@ -94,7 +94,10 @@ case "${COMMAND}" in
   destroy)
     init
     echo "WARNING: this will destroy the scheduler in tenant '${TENANT}'."
-    terraform -chdir="${ROOT_DIR}" destroy -input=false -var-file="${VAR_FILE}"
+    # No -input=false here: destroy needs Terraform's interactive "yes" prompt.
+    # With -input=false and no -auto-approve, Terraform cannot prompt and aborts
+    # (same class of bug M7 fixed for apply). DR-12.
+    terraform -chdir="${ROOT_DIR}" destroy -var-file="${VAR_FILE}"
     ;;
   *)
     die "unknown command: ${COMMAND} (use init|plan|apply|output|destroy)"
