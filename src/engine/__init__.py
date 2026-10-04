@@ -1,7 +1,7 @@
 """Core reconciliation engine for the Azure Resource Power Scheduler.
 
 Phase 0 provides the package skeleton only. Modules are implemented in later
-phases per docs/PHASE1_TASKS.md:
+phases per docs/archive/PHASE1_TASKS.md:
 
 - evaluator  (T-101): pure desired-state evaluation
 - discovery  (T-201): Azure Resource Graph discovery with paging

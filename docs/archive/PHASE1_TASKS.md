@@ -1,9 +1,11 @@
 # Phase 1 Implementation Task Breakdown
 
+> 🗄️ **Archived on 2026-10-04.** Implementation is complete (Phases 0–5 and T-601). The remaining tasks, **T-602** (dry run) and **T-603** (go-live), are tracked in [VERIFICATION.md](../VERIFICATION.md#0-status-tracker). This file is kept as a historical record and is no longer updated. Task IDs stay valid and are still referenced from code comments and commits.
+
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-TASKS-001 |
-| Related spec | [REQUIREMENTS.md](REQUIREMENTS.md) (AZ-PWRSCHED-RS-001, v0.3) |
+| Related spec | [REQUIREMENTS.md](../REQUIREMENTS.md) (AZ-PWRSCHED-RS-001, v0.3) |
 | Created | 2026-10-03 |
 | Last updated | 2026-10-03 (Phase 5 + T-601 complete; `_build_runtime` wired; CI + verification runbook added) |
 | Status legend | ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked |
@@ -211,7 +213,7 @@
 - **Description:** `terraform fmt -check`, `terraform validate`; run the full Python test suite.
 - **DoD:** All pass; no formatting diffs.
 - **Depends on:** T-405, T-102, T-204
-- **Status:** ✅ Done — recorded 2026-10-03: `python -m pytest` → **102 passed**; `terraform fmt -check -recursive infra/` → exit 0 (no diffs); `terraform validate` (infra/scheduler) → **Success** (azurerm 4.81.0). Also completed the deferred `_build_runtime` wiring (see note below) so the Function App is runnable once deployed. Now **enforced in CI** (`.github/workflows/ci.yml`); procedure documented in [VERIFICATION.md](VERIFICATION.md).
+- **Status:** ✅ Done — recorded 2026-10-03: `python -m pytest` → **102 passed**; `terraform fmt -check -recursive infra/` → exit 0 (no diffs); `terraform validate` (infra/scheduler) → **Success** (azurerm 4.81.0). Also completed the deferred `_build_runtime` wiring (see note below) so the Function App is runnable once deployed. Now **enforced in CI** (`.github/workflows/ci.yml`); procedure documented in [VERIFICATION.md](../VERIFICATION.md).
 
 ### T-602 — Deploy & dry-run validation
 - **Satisfies:** README Step 4–6, FR-030

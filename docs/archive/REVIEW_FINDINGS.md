@@ -1,13 +1,15 @@
 # Code Review Findings – Phase 1 Implementation
 
+> 🗄️ **Archived on 2026-10-04.** All 29 findings (rounds 1–3) are closed at the code level. The eight checks that need a live deployment (C1, C3, H1, H2, M4, N3, N4, N6) are tracked in [VERIFICATION.md](../VERIFICATION.md#0-status-tracker), and their results are recorded there. This file is kept as a historical record and is no longer updated. Finding IDs stay valid and are still referenced from code comments, tests and commits.
+
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-REVIEW-001 |
-| Related | [REQUIREMENTS.md](REQUIREMENTS.md) (v0.4), [PHASE1_TASKS.md](PHASE1_TASKS.md), [VERIFICATION.md](VERIFICATION.md) |
+| Related | [REQUIREMENTS.md](../REQUIREMENTS.md) (v0.4), [PHASE1_TASKS.md](PHASE1_TASKS.md), [VERIFICATION.md](../VERIFICATION.md) |
 | Reviewed commit | Round 1: `f081718` · Round 2: `014300e` (PR #1, fix commit `65b6a1e`) · Round 3: `1007a59` |
 | Review date | 2026-10-03 |
 | Scope | `src/`, `infra/`, `config/`, `tests/`, `.github/workflows/ci.yml`, docs |
-| Overall verdict | **Round 3: all findings are closed at the code level. Proceed to T-602 (dry run).** Of the 29 findings across rounds 1–2, 26 are closed and 3 (H1, M4, N3) are fixed in code but need live verification. Live checks for those, plus the live criteria of C1, C3, H2 and N4, are in [VERIFICATION.md §3.4](VERIFICATION.md#34-live-verification-of-review-findings) and §5. Go-live (T-603) requires those checks to pass. Re-run at `1007a59`: pytest 143 passed with pinned SDKs, strict SDK-surface test passes, ruff clean. |
+| Overall verdict | **Round 3: all findings are closed at the code level. Proceed to T-602 (dry run).** Of the 29 findings across rounds 1–2, 26 are closed and 3 (H1, M4, N3) are fixed in code but need live verification. Live checks for those, plus the live criteria of C1, C3, H2 and N4, are in [VERIFICATION.md §3.4](../VERIFICATION.md#34-live-verification-of-review-findings) and §5. Go-live (T-603) requires those checks to pass. Re-run at `1007a59`: pytest 143 passed with pinned SDKs, strict SDK-surface test passes, ruff clean. |
 
 > **How to use this document:** Each finding has an ID, severity, location, evidence, a recommended fix and acceptance criteria. When a finding is fixed, update its **Status**, fill in **Resolved in** (commit or PR) and add a line to the [Status log](#status-log). Do not delete findings; mark them `Closed` or `Won't fix` with a reason.
 

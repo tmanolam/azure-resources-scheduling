@@ -3,11 +3,52 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-VERIFY-001 |
-| Related | [REQUIREMENTS.md](REQUIREMENTS.md), [PHASE1_TASKS.md](PHASE1_TASKS.md), [../README.md](../README.md) |
+| Related | [REQUIREMENTS.md](REQUIREMENTS.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
+| Last updated | 2026-10-04 |
 | Scope | How to verify the scheduler — static checks (T-601), live dry-run (T-602), go-live (T-603) |
 
-This runbook is the repeatable procedure behind Phase 6. T-601 runs offline (and
-in CI); T-602/T-603 require a live Azure tenant.
+This runbook is the repeatable procedure for verifying the scheduler and is the
+single place to track what remains before go-live. T-601 runs offline (and in
+CI); T-602/T-603 require a live Azure tenant.
+
+Implementation and code review are finished; their documents are in
+[archive/](archive/README.md). Task IDs (`T-xxx`) and finding IDs (`C1`, `N3`, …)
+below refer to those archived documents.
+
+---
+
+## 0. Status tracker
+
+Update the **Status** column as each item completes, and record the evidence in
+the [results log](#6-results-log).
+
+**Status legend:** ⬜ Not started · 🔍 Pending live check · 🟡 In progress · ✅ Done · ⛔ Blocked
+
+### Tasks
+
+| ID | Item | Where | Status |
+|---|---|---|---|
+| T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
+| OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ⛔ Blocks T-602 |
+| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | ⬜ Not started |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 and all live checks below) |
+
+### Live checks carried over from the code review
+
+Each of these is fixed in code but can only be confirmed on a deployed app. All
+must pass before T-603. Background on each ID is in
+[archive/REVIEW_FINDINGS.md](archive/REVIEW_FINDINGS.md).
+
+| ID | Live check | Where | Status |
+|---|---|---|---|
+| C1 | Resources in prod subscriptions logged as `production-excluded`, never acted on | [§3.3](#33-dry-run-checklist-one-cycle--15-min) | 🔍 Pending |
+| C3 | SQL MI `actualState` never `Unknown` | [§3.4](#34-live-verification-of-review-findings), Query 2 | 🔍 Pending |
+| H1 | Decision records carry all OBS-001 fields | §3.4, Query 1 | 🔍 Pending |
+| H2 | Cycle-health and cycle-exceptions alerts fire | [§5](#5-alert-verification-obs-003004005) | 🔍 Pending |
+| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | 🔍 Pending |
+| N3 | Summary count matches invocation count | §3.4, Queries 3 and 6 | 🔍 Pending |
+| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending |
+| N6 | `dryRun` stored as `true` | §3.4, Query 1 | 🔍 Pending |
 
 ---
 
@@ -22,11 +63,15 @@ python -m pip install pytest tzdata     # once
 python -m pytest -q
 ```
 
-**Expected:** all tests pass (currently **102 passed**). The suite covers the
-pure evaluator (timezones, midnight crossing, overrides), discovery paging,
-selection (production hard-exclusion, tag precedence), ordering/safety, the
-reconcile orchestrator (dry-run, 429 back-off), the 7 handlers, telemetry field
-contract, and the App Configuration loader + runtime assembly.
+**Expected:** all tests pass (currently **136 passed, 7 skipped**). The 7 skipped
+are the SDK surface checks, which need `src/requirements.txt` installed and run in
+the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 143 pass. The
+suite covers the pure evaluator (timezones, midnight crossing, overrides),
+discovery (paging, Resource Graph joins and power state), selection (production
+hard-exclusion and its fail-safe, tag precedence, scope exclusion),
+ordering/safety, the reconcile orchestrator (dry-run, skips, bounded parallel
+state reads), the 7 handlers, the telemetry field contract, observability
+flushing, and the App Configuration loader + runtime assembly.
 
 ### 1.2 Terraform static checks (IAC-008)
 
@@ -45,8 +90,10 @@ terraform validate
 ### 1.3 CI
 
 These checks run automatically on every push / PR to `main` via
-`.github/workflows/ci.yml` (jobs: **Python unit tests**, **Ruff lint**, and
-**Terraform fmt + validate**). CI performs **no deployment** and needs no cloud
+`.github/workflows/ci.yml` (jobs: **Python unit tests**, **SDK surface
+(requirements.txt)**, **Ruff lint**, and **Terraform fmt + validate**). The SDK
+surface job installs `src/requirements.txt` and runs `tests/test_sdk_surface.py`
+with `PWRSCHED_SDK_SURFACE_STRICT=1`, so a missing SDK method fails CI. CI performs **no deployment** and needs no cloud
 credentials.
 
 Run the linter locally the same way CI does (finding L5):
@@ -156,8 +203,8 @@ re-apply; the engine is idempotent, so no cleanup is needed.
 ### 3.4 Live verification of review findings
 
 Several review findings are fixed in code but can only be proven on a deployed
-app (status 🔍 in [REVIEW_FINDINGS.md](REVIEW_FINDINGS.md)). Run these checks
-during the dry run, then update each finding's status and the status log.
+app (status 🔍 in the [§0 tracker](#0-status-tracker)). Run these checks during
+the dry run, then update the tracker and the [results log](#6-results-log).
 Let the scheduler run for **at least 3 hours** before the count-based checks.
 
 Set up once:
@@ -257,7 +304,7 @@ Checklist:
 - [ ] N3: Query 3 and Query 6 counts match
 - [ ] N4: Query 7 shows `profile = weekday-0830-1730`
 - [ ] H2: both alert tests in [section 5](#5-alert-verification-obs-003004005) fire
-- [ ] Statuses and status log updated in `REVIEW_FINDINGS.md`
+- [ ] §0 tracker and §6 results log updated
 
 ---
 
@@ -326,3 +373,15 @@ dry-run mode, and restore afterwards):
 - [ ] Cycle-health alert fired and notified
 - [ ] Cycle-exceptions alert fired and notified
 - [ ] Settings restored; `terraform plan` shows no changes
+
+---
+
+## 6. Results log
+
+Record each verification run here: what was checked, the outcome, and where the
+evidence is (query output, screenshot, alert notification). If a check fails,
+log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the check.
+
+| Date | Item(s) | Result | Evidence / notes | By |
+|---|---|---|---|---|
+| 2026-10-04 | T-601 | ✅ Pass | Re-run locally at `1eb0498`: 143 passed with pinned SDKs (136 passed, 7 skipped without), strict SDK surface 7 passed, ruff clean. Terraform fmt/validate per the CI job. | Claude |

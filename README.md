@@ -77,7 +77,10 @@ more than one instance; it is empty by default.
 azure-power-scheduler/
 ├── README.md
 ├── docs/
-│   └── REQUIREMENTS.md
+│   ├── REQUIREMENTS.md
+│   ├── VERIFICATION.md             # live verification runbook + status tracker
+│   ├── presentations/              # solution decks
+│   └── archive/                    # finished implementation docs (tasks, code review)
 ├── config/                         # Loaded into App Configuration by Terraform
 │   └── profiles/                   # schedule profiles (settings come from tfvars)
 │       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok
