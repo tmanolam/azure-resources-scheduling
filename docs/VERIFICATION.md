@@ -3,7 +3,7 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-VERIFY-001 |
-| Related | [REQUIREMENTS.md](REQUIREMENTS.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
+| Related | [REQUIREMENTS.md](REQUIREMENTS.md), [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
 | Last updated | 2026-10-04 |
 | Scope | How to verify the scheduler — static checks (T-601), live dry-run (T-602), go-live (T-603) |
 
@@ -21,6 +21,10 @@ below refer to those archived documents.
 
 Update the **Status** column as each item completes, and record the evidence in
 the [results log](#6-results-log).
+
+To run these checks in a disposable demo tenant first, follow
+[DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md); its §7 maps each demo scenario to the
+items below.
 
 **Status legend:** ⬜ Not started · 🔍 Pending live check · 🟡 In progress · ✅ Done · ⛔ Blocked
 
