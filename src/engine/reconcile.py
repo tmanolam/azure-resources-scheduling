@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Callable, Mapping, Optional, Protocol, Sequence
 
@@ -60,7 +61,9 @@ class ReconcileConfig:
 
     dry_run: bool = True
     max_actions_per_run: int = 200
-    # Bounds the thread pool used to read/confirm actual state via ARM (M1).
+    # Bounds the ThreadPoolExecutor that reads/confirms actual state via ARM for
+    # resources without a Resource Graph power state (M1/N7). See
+    # ``_prefetch_fallback_states``.
     max_parallel_arm_calls: int = 10
 
 
@@ -151,19 +154,86 @@ def _read_actual_state(resource: ResourceRecord, handler: "Handler") -> ActualSt
     return _normalise_actual(raw)
 
 
+def _needs_fallback_read(resource: ResourceRecord) -> bool:
+    """True when actual state is not in Resource Graph and needs a handler read.
+
+    These are the only resources that incur a per-resource ARM ``get_state``
+    call (e.g. VM scale sets, which have no power state in Resource Graph).
+    """
+    return not (resource.power_state or "").strip()
+
+
+def _prefetch_fallback_states(
+    selections: Sequence[SelectionResult],
+    handlers: Mapping[str, Handler],
+    max_parallel_arm_calls: int,
+) -> dict[str, ActualState]:
+    """Read actual state for fallback resources concurrently (N7, M1).
+
+    Only resources whose state is absent from Resource Graph
+    (:func:`_needs_fallback_read`) need an ARM ``get_state`` call. Those reads
+    are independent and I/O-bound, so they run in a bounded ``ThreadPoolExecutor``
+    sized by ``max_parallel_arm_calls`` (NFR-005) instead of sequentially, which
+    keeps a large cycle within the 5-minute budget (NFR-002).
+
+    Returns a map of resource_id -> ActualState for the fallback resources only;
+    resources whose read raised are omitted (the sequential planner then records
+    ``state-read-failed`` for them). Resources with a Resource Graph power state
+    are not included here — the planner reads those directly (no ARM call).
+    """
+    targets = [
+        sel.resource
+        for sel in selections
+        if sel.eligible
+        and handlers.get(sel.resource.handler_key) is not None
+        and _needs_fallback_read(sel.resource)
+    ]
+    if not targets:
+        return {}
+
+    # Deduplicate by resource_id to avoid reading the same resource twice.
+    unique: dict[str, ResourceRecord] = {r.resource_id: r for r in targets}
+    workers = max(1, min(int(max_parallel_arm_calls or 1), len(unique)))
+
+    def _read(r: ResourceRecord) -> tuple[str, Optional[ActualState]]:
+        handler = handlers[r.handler_key]
+        try:
+            return r.resource_id, _normalise_actual(handler.get_state(r))
+        except Exception as exc:  # defensive: a read failure must not abort the cycle
+            logger.warning("pwrsched.reconcile: get_state failed for %s: %s", r.resource_id, exc)
+            return r.resource_id, None
+
+    states: dict[str, ActualState] = {}
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="arm-getstate") as pool:
+        for rid, state in pool.map(_read, unique.values()):
+            if state is not None:
+                states[rid] = state
+    return states
+
+
 def plan_actions(
     selections: Sequence[SelectionResult],
     *,
     now,
     profile_provider: Callable[[str], Optional[Profile]],
     handlers: Mapping[str, Handler],
+    max_parallel_arm_calls: int = 10,
 ) -> list[PlannedAction]:
     """Build planned actions from eligible selections (desired vs actual diff).
 
     Ineligible selections and converged/transitional/unknown resources produce a
     PlannedAction with ActionType.NONE and a reason so they are still logged.
+
+    Resources whose actual state is not available from Resource Graph need a
+    per-resource ARM ``get_state`` read; those reads are performed up front in a
+    bounded thread pool sized by ``max_parallel_arm_calls`` (N7, NFR-005) so a
+    large cycle stays within the 5-minute budget (NFR-002).
     """
     planned: list[PlannedAction] = []
+
+    # N7: prefetch the fallback (ARM) state reads concurrently; resources with a
+    # Resource Graph power state are resolved directly below without an ARM call.
+    fallback_states = _prefetch_fallback_states(selections, handlers, max_parallel_arm_calls)
 
     for sel in selections:
         r = sel.resource
@@ -192,12 +262,16 @@ def plan_actions(
             planned.append(_none_action(r, "no-handler", sel.profile_name, sel.order or 3))
             continue
 
-        try:
+        if _needs_fallback_read(r):
+            # Resolved by the prefetch pool. Absent => the read failed.
+            actual = fallback_states.get(r.resource_id)
+            if actual is None:
+                planned.append(_none_action(r, "state-read-failed", sel.profile_name,
+                                            sel.order or 3, decision.warning))
+                continue
+        else:
+            # Resource Graph power state (M1): pure, no ARM call.
             actual = _read_actual_state(r, handler)
-        except Exception as exc:  # defensive: a read failure must not abort the cycle
-            logger.warning("pwrsched.reconcile: get_state failed for %s: %s", r.resource_id, exc)
-            planned.append(_none_action(r, "state-read-failed", sel.profile_name, sel.order or 3, decision.warning))
-            continue
 
         if actual is ActualState.TRANSITIONAL:
             planned.append(_none_action(r, "transitional-skip", sel.profile_name, sel.order or 3,
@@ -351,7 +425,8 @@ def run_reconcile(
     summary = CycleSummary(run_id=run_id)
 
     planned = plan_actions(
-        selections, now=now, profile_provider=profile_provider, handlers=handlers
+        selections, now=now, profile_provider=profile_provider, handlers=handlers,
+        max_parallel_arm_calls=config.max_parallel_arm_calls,
     )
     summary.evaluated = len(planned)
 

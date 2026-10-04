@@ -64,6 +64,22 @@ def test_production_tag_on_resource_does_not_opt_out_but_sub_tag_does():
     assert s.eligible is True  # resource-level env=prod is not the hard rule
 
 
+def test_production_exclusion_tag_key_case_insensitive():
+    # N5: Azure tag names are case-insensitive; 'Environment' must still exclude.
+    r = _vm(sub_tags={"Environment": "prod"}, tags={"schedule-profile": "p"})
+    s = _one(select_resources([r], enabled_handler_keys=["vm"]))
+    assert s.eligible is False
+    assert s.reason == "production-excluded"
+
+
+def test_production_exclusion_tag_key_and_value_mixed_case():
+    # N5: 'ENVIRONMENT=Prod' must also exclude (value already lowercased).
+    r = _vm(sub_tags={"ENVIRONMENT": "Prod"}, tags={"schedule-profile": "p"})
+    s = _one(select_resources([r], enabled_handler_keys=["vm"]))
+    assert s.eligible is False
+    assert s.reason == "production-excluded"
+
+
 def test_excluded_scope_subscription():
     r = _vm(tags={"schedule-profile": "p"}, sub="s1")
     s = _one(select_resources([r], enabled_handler_keys=["vm"],

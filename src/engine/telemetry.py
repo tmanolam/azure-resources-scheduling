@@ -76,10 +76,14 @@ def _attrs(**fields) -> dict:
     """Build a flat OpenTelemetry attribute dict (``pwrsched.<field>`` keys).
 
     None values are dropped (OpenTelemetry attribute values must be scalars and
-    an absent field is simply omitted).
+    an absent field is simply omitted). Booleans are emitted as the lowercase
+    strings ``"true"``/``"false"`` (N6): the OpenTelemetry/Application Insights
+    pipeline would otherwise surface Python booleans as ``True``/``False`` in
+    ``customDimensions``, breaking the README/VERIFICATION expectation that
+    ``dryRun`` reads ``true`` and any ``== "true"`` KQL comparison.
     """
     return {
-        f"{ATTR_PREFIX}{k}": v
+        f"{ATTR_PREFIX}{k}": (str(v).lower() if isinstance(v, bool) else v)
         for k, v in fields.items()
         if v is not None
     }

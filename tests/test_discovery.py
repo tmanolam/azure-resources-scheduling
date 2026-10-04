@@ -22,8 +22,11 @@ def _row(rid, rtype, sub="s1", rg="rg1", tags=None, rg_tags=None, sub_tags=None,
     """Build a raw Resource Graph row shaped like the joined query output.
 
     ``with_sub_container=False`` simulates the subscription container row not
-    joining (identity lacks Microsoft.Resources/subscriptions/read) — the
-    ``subscriptionTags``/``mgChain`` keys are absent (C1 fail-safe path).
+    joining (identity lacks Microsoft.Resources/subscriptions/read). With a
+    ``leftouter`` join Resource Graph still returns every projected column, but
+    the join key ``subId`` (and the other subscription columns) is ``null`` —
+    this is the real shape the C1 fail-safe must detect (finding N1), so the
+    keys are present with ``None`` values rather than absent.
     """
     row = {
         "id": rid, "type": rtype, "subscriptionId": sub, "resourceGroup": rg,
@@ -32,8 +35,14 @@ def _row(rid, rtype, sub="s1", rg="rg1", tags=None, rg_tags=None, sub_tags=None,
         "resourceGroupTags": rg_tags or {},
     }
     if with_sub_container:
+        row["subId"] = sub
         row["subscriptionTags"] = sub_tags or {}
         row["mgChain"] = []
+    else:
+        # Unmatched leftouter join: columns present but null.
+        row["subId"] = None
+        row["subscriptionTags"] = None
+        row["mgChain"] = None
     return row
 
 
@@ -56,6 +65,23 @@ def test_build_kql_joins_resourcecontainers_for_inherited_tags():
     assert "subscriptionTags" in q
     assert "coalesce(" in q
     assert "mgChain" in q
+
+
+def test_build_kql_projects_sub_id_join_key():
+    # N1: the subscription join key must be projected so the engine can detect
+    # a null (unmatched) subscription row for the BR-003 fail-safe.
+    q = build_kql_query(["vm"])
+    assert "subId = subscriptionId" in q
+    assert ", subId," in q or " subId," in q  # kept in the final projection
+
+
+def test_build_kql_lowercases_both_sides_of_rg_join():
+    # N4: both sides of the RG join must be lowercased so a mixed-case
+    # resourceGroup on the Resources row still matches the RG container.
+    q = build_kql_query(["vm"])
+    assert "rgKey = tolower(resourceGroup)" in q
+    assert "rgName = tolower(name)" in q
+    assert "$left.rgKey == $right.rgName" in q
 
 
 def test_build_kql_projects_power_state():
@@ -153,11 +179,26 @@ def test_c1_production_excluded_end_to_end_from_raw_row():
     assert results[0].reason == "production-excluded"
 
 
-def test_c1_fail_safe_when_subscription_container_missing():
-    # C1 fail-safe: subscription row did not join -> ineligible, not assumed safe.
+def test_c1_fail_safe_when_subscription_container_null():
+    # N1: subscription row did not join -> leftouter leaves subId (and the other
+    # subscription columns) null, which is the real Resource Graph shape. The
+    # resource must be ineligible, not assumed safe.
     rec = _discover_one(_row(_VM_RID, _VM_TYPE,
                              tags={"schedule-profile": "weekday-0830-1730"},
                              with_sub_container=False))
+    assert rec.subscription_container_seen is False
+    results = select_resources([rec], enabled_handler_keys=["vm"])
+    assert results[0].eligible is False
+    assert results[0].reason == "subscription-tags-unavailable"
+
+
+def test_c1_fail_safe_when_subscription_keys_absent():
+    # Defensive: if a future query shape omits the subscription columns entirely
+    # (keys absent), the fail-safe must still treat the resource as ineligible.
+    row = _row(_VM_RID, _VM_TYPE, tags={"schedule-profile": "weekday-0830-1730"})
+    for key in ("subId", "subscriptionTags", "mgChain"):
+        row.pop(key, None)
+    rec = _discover_one(row)
     assert rec.subscription_container_seen is False
     results = select_resources([rec], enabled_handler_keys=["vm"])
     assert results[0].eligible is False

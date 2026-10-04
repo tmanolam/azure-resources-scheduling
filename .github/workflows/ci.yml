@@ -37,6 +37,33 @@ jobs:
       - name: Run unit tests
         run: python -m pytest -q
 
+  sdk-surface:
+    name: SDK surface (requirements.txt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the Function App runtime dependencies
+        # N2: install the full src/requirements.txt so every handler's Azure SDK
+        # client is importable; the surface test then exercises the real pinned
+        # versions instead of skipping.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install -r src/requirements.txt
+
+      - name: Run the SDK surface test (strict — fail on skips)
+        # PWRSCHED_SDK_SURFACE_STRICT=1 turns a missing-SDK skip into a failure,
+        # so a bad pin (e.g. azure-mgmt-sql without begin_start) fails CI (C3/N2).
+        env:
+          PWRSCHED_SDK_SURFACE_STRICT: "1"
+        run: python -m pytest tests/test_sdk_surface.py -rs -v
+
   lint:
     name: Ruff lint
     runs-on: ubuntu-latest

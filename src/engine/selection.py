@@ -70,6 +70,23 @@ def resolve_effective_tags(resource: ResourceRecord) -> dict[str, str]:
     return merged
 
 
+def _get_tag_ci(tags: Optional[Mapping[str, str]], key: str) -> Optional[str]:
+    """Look up a tag value by a case-insensitive key (N5).
+
+    Azure tag *names* are case-insensitive, so ``Environment`` and
+    ``environment`` are the same tag. The BR-003 production hard-exclusion must
+    not depend on exact casing (nor solely on the A-08 policy), so the most
+    important safety rule normalises the key before matching.
+    """
+    if not tags:
+        return None
+    key_lower = key.lower()
+    for k, v in tags.items():
+        if str(k).lower() == key_lower:
+            return v
+    return None
+
+
 def _is_under_excluded_scope(resource: ResourceRecord, exclude_scopes: Sequence[str]) -> Optional[str]:
     """Return the matching exclude scope if the resource is under one, else None.
 
@@ -138,8 +155,10 @@ def select_resources(
             continue
 
         # BR-003: production hard-exclusion (checked on subscription tags only,
-        # which cannot be overridden by resource/RG tags).
-        if (r.subscription_tags or {}).get(ENV_TAG, "").strip().lower() == PROD_ENV_VALUE:
+        # which cannot be overridden by resource/RG tags). The tag key is
+        # matched case-insensitively (Azure tag names are case-insensitive, N5).
+        env_value = _get_tag_ci(r.subscription_tags, ENV_TAG) or ""
+        if env_value.strip().lower() == PROD_ENV_VALUE:
             results.append(SelectionResult(r, False, "production-excluded"))
             continue
 

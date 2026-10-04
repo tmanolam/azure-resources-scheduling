@@ -62,6 +62,15 @@ def reconcile(timer: func.TimerRequest) -> None:
     except Exception:  # noqa: BLE001 — log and let the alert on cycle failure fire (OBS-003)
         logging.exception("pwrsched: reconciliation cycle failed run=%s", run_id)
         raise
+    finally:
+        # N3: drain any buffered telemetry (notably the pwrsched.summary record)
+        # before the worker can be scaled in or frozen. Guarded internally.
+        try:
+            from observability import flush_telemetry
+
+            flush_telemetry()
+        except Exception:  # noqa: BLE001 — flushing must never break a cycle
+            logging.exception("pwrsched: telemetry flush failed run=%s", run_id)
 
 
 def _run_cycle(run_id: str) -> None:

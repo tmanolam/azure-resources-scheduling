@@ -304,3 +304,57 @@ def test_plan_rg_stopped_vm_is_deallocated():
                             profile_provider=_profiles, handlers={"vm": h},
                             config=ReconcileConfig(dry_run=False))
     assert h.stopped == ["/vm1"] and summary.stopped == 1
+
+
+# --- N7: fallback get_state reads use a bounded thread pool ------------------
+
+def test_fallback_reads_run_concurrently_bounded_by_config():
+    # N7: resources without a Resource Graph power state need an ARM get_state;
+    # those reads must run concurrently (bounded by max_parallel_arm_calls), not
+    # one-by-one. We observe concurrency with a barrier-like counter.
+    import threading
+
+    max_parallel = 4
+    n = 8
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0}
+
+    class SlowHandler(FakeHandler):
+        def get_state(self, resource):
+            with lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            # Spin briefly so overlapping reads actually coincide.
+            import time as _t
+            _t.sleep(0.02)
+            with lock:
+                state["active"] -= 1
+            return "Running"
+
+    h = SlowHandler("Running")
+    sels = [_sel(f"vm{i}") for i in range(n)]  # _rec has no power_state => fallback
+    summary = run_reconcile(sels, now=_friday_6pm(), run_id="r1",
+                            profile_provider=_profiles, handlers={"vm": h},
+                            config=ReconcileConfig(dry_run=False, max_parallel_arm_calls=max_parallel))
+    # Fri 18:00 desired Stopped; all running => all stopped.
+    assert summary.stopped == n
+    # Concurrency was used, and never exceeded the configured bound.
+    assert state["peak"] > 1
+    assert state["peak"] <= max_parallel
+
+
+def test_fallback_read_failure_is_state_read_failed():
+    # N7: a get_state that raises during the prefetch must yield a logged
+    # 'state-read-failed' decision, not abort the cycle or raise.
+    from engine.models import ActionType
+    from engine.reconcile import plan_actions
+
+    class BoomHandler(FakeHandler):
+        def get_state(self, resource):
+            raise RuntimeError("ARM read failed")
+
+    planned = plan_actions([_sel("vm1")], now=_friday_6pm(), profile_provider=_profiles,
+                           handlers={"vm": BoomHandler("x")})
+    assert len(planned) == 1
+    assert planned[0].action is ActionType.NONE
+    assert planned[0].reason == "state-read-failed"

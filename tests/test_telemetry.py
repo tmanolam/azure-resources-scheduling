@@ -117,7 +117,7 @@ def test_emit_decision_fields(captured):
     assert cd["actualState"] == "Stopped"
     assert cd["action"] == "start"
     assert cd["result"] == "submitted"
-    assert cd["dryRun"] is False
+    assert cd["dryRun"] == "false"  # N6: booleans emitted as lowercase strings
 
 
 def test_emit_summary_fields(captured):
@@ -130,6 +130,7 @@ def test_emit_summary_fields(captured):
                 "failed", "capReached", "durationSeconds"]:
         assert key in cd
     assert cd["evaluated"] == 5 and cd["failed"] == 1
+    assert cd["capReached"] == "false"  # N6: booleans as lowercase strings
 
 
 def test_emit_cap_reached_fields(captured):
@@ -153,7 +154,7 @@ def test_run_reconcile_emits_decision_and_summary(captured):
     assert len(decisions) == 1
     assert decisions[0]["action"] == "start"
     assert decisions[0]["result"] == "dry-run"   # FR-030: dry-run result
-    assert decisions[0]["dryRun"] is True
+    assert decisions[0]["dryRun"] == "true"      # N6: lowercase string
 
 
 def test_run_reconcile_emits_decision_for_ineligible(captured):

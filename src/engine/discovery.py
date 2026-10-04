@@ -97,17 +97,27 @@ def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
     return (
         "Resources "
         f"| where tolower(type) in ({types_literal}) "
+        # N4: normalise the resource's own resource-group name before the join
+        # so both sides compare lowercased. Resource Graph may return a
+        # mixed-case resourceGroup on the Resources row, which would otherwise
+        # silently miss the (already lowercased) RG container key.
+        "| extend rgKey = tolower(resourceGroup) "
         # Join the resource group container to pick up RG-level tags. Resource
         # Graph exposes the RG container's name (not full id) and its owning
-        # subscription, so match on (subscriptionId, resourceGroup name).
+        # subscription, so match on (subscriptionId, resourceGroup name), both
+        # lowercased (N4).
         "| join kind=leftouter ("
         "ResourceContainers "
         "| where tolower(type) == 'microsoft.resources/subscriptions/resourcegroups' "
         "| project rgSubId = subscriptionId, rgName = tolower(name), "
         "resourceGroupTags = tags"
         ") on $left.subscriptionId == $right.rgSubId "
-        "and $left.resourceGroup == $right.rgName "
+        "and $left.rgKey == $right.rgName "
         # Join the subscription container to pick up subscription-level tags.
+        # ``subId`` is projected and kept so the engine can tell whether this
+        # subscription row actually joined: with a leftouter join an unmatched
+        # row carries ``subId == null`` (not an absent column), which is the
+        # BR-003 fail-safe signal (N1).
         "| join kind=leftouter ("
         "ResourceContainers "
         "| where tolower(type) == 'microsoft.resources/subscriptions' "
@@ -130,7 +140,7 @@ def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
         "properties.operationalState"                           # appgw
         ")) "
         "| project id, type, subscriptionId, resourceGroup, location, tags, "
-        "resourceGroupTags, subscriptionTags, mgChain, powerState"
+        "resourceGroupTags, subscriptionTags, subId, mgChain, powerState"
     )
 
 
@@ -215,12 +225,14 @@ def _row_to_record(row: Mapping[str, object]) -> Optional[ResourceRecord]:
     subscription_tags = _coerce_tags(sub_tags_raw)
     resource_group_tags = _coerce_tags(rg_tags_raw)
 
-    # Whether the subscription container row was returned at all. ``mgChain`` is
-    # only present on the subscription container, so its presence is a reliable
-    # signal that the subscription row joined. Used by selection's fail-safe
+    # Whether the subscription container row was returned at all. With a
+    # ``leftouter`` join every projected column is present on the row even when
+    # no subscription matched; an unmatched row carries ``subId == null``. So we
+    # must test the *value* of the join key, not key presence — testing presence
+    # made the C1 fail-safe fail open (finding N1). Used by selection's fail-safe
     # (C1): if the subscription could not be read we must not treat the resource
     # as production-safe.
-    subscription_seen = ("subscriptionTags" in row) or ("mgChain" in row)
+    subscription_seen = row.get("subId") is not None
 
     return ResourceRecord(
         resource_id=resource_id,

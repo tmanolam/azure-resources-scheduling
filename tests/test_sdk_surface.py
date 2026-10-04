@@ -13,9 +13,12 @@ it instantiates the client without credentials and introspects attributes; it
 makes no network calls.
 
 The Azure SDKs are optional for the pure-engine unit tests, so when a client
-package is not installed the individual assertion is skipped. In CI the Function
-App ``requirements.txt`` is installed, so the full matrix runs and would fail if
-a pinned version does not expose a required method.
+package is not installed the individual assertion is skipped. A dedicated CI job
+(``sdk-surface`` in ``.github/workflows/ci.yml``) installs
+``src/requirements.txt`` and runs this module with
+``PWRSCHED_SDK_SURFACE_STRICT=1`` set, which turns a would-be skip into a hard
+failure — so the full matrix runs there and a pinned version that does not
+expose a required method fails CI (finding N2).
 """
 
 from __future__ import annotations
@@ -113,6 +116,13 @@ def _top_level_installed(module_name: str) -> bool:
         return False
 
 
+# N2: in CI the Function App ``requirements.txt`` is installed and this env var
+# is set, turning a would-be skip (SDK missing) into a hard failure. This closes
+# the gap where all 7 checks silently skipped in CI, so a bad SDK pin would have
+# passed (the exact way C3 slipped through).
+_STRICT = os.environ.get("PWRSCHED_SDK_SURFACE_STRICT") == "1"
+
+
 @pytest.mark.parametrize(
     "handler_key,module_name,class_name,op_group,methods",
     _SURFACE,
@@ -122,7 +132,15 @@ def test_handler_client_exposes_required_methods(
     handler_key, module_name, class_name, op_group, methods
 ):
     if not _top_level_installed(module_name):
-        pytest.skip(f"{module_name} not installed; skipping surface check for {handler_key}")
+        msg = f"{module_name} not installed; skipping surface check for {handler_key}"
+        if _STRICT:
+            # N2: in CI (strict mode) a missing SDK is a failure, not a skip —
+            # requirements.txt must install every handler's client.
+            pytest.fail(
+                f"{msg}. PWRSCHED_SDK_SURFACE_STRICT=1 requires src/requirements.txt "
+                f"to be installed so the full surface matrix runs."
+            )
+        pytest.skip(msg)
 
     # Installed but broken import (e.g. wrong pin / missing transitive dep) is a
     # real failure, not a skip.

@@ -63,3 +63,29 @@ def configure_telemetry() -> bool:
     _configured = True
     logger.info("pwrsched.observability: Azure Monitor OpenTelemetry configured")
     return True
+
+
+def flush_telemetry(timeout_millis: int = 5000) -> None:
+    """Force-export any buffered telemetry before the invocation ends (N3).
+
+    The Azure Monitor OpenTelemetry distro exports log records in background
+    batches. On Flex Consumption the worker can be scaled in or frozen soon
+    after a cycle returns, dropping the final batch — including the
+    ``pwrsched.summary`` record, whose absence would also falsely trip the
+    OBS-003 cycle-health alert. Calling ``force_flush`` on the logger provider
+    at the end of each invocation drains that batch.
+
+    Guarded so a flush failure (or the SDK being absent in local/offline runs)
+    never breaks the cycle. No-op when telemetry was never configured.
+    """
+    if not _configured:
+        return
+    try:
+        from opentelemetry._logs import get_logger_provider
+
+        provider = get_logger_provider()
+        force_flush = getattr(provider, "force_flush", None)
+        if callable(force_flush):
+            force_flush(timeout_millis)
+    except Exception:  # noqa: BLE001 — flushing must never break a cycle
+        logger.warning("pwrsched.observability: telemetry force_flush failed", exc_info=True)
