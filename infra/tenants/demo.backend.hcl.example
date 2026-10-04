@@ -1,0 +1,12 @@
+# Demo tenant Terraform state backend for the shipped scheduler, used via
+#   ./infra/deploy.sh demo <cmd>
+#
+# Copy to demo.backend.hcl and fill the state storage account (create it in the
+# demo tenant's management subscription per README Step 2). Real demo.backend.hcl
+# is gitignored; only this .example is committed.
+
+resource_group_name  = "rg-tfstate-demo"
+storage_account_name = "<demo-state-storage-account-name>"
+container_name       = "tfstate"
+key                  = "pwrsched/demo.tfstate"
+use_azuread_auth     = true

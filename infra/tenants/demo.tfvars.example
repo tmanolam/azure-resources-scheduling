@@ -1,0 +1,46 @@
+# Demo tenant variables for the shipped scheduler (infra/scheduler), used via
+#   ./infra/deploy.sh demo <plan|apply|destroy>
+#
+# Copy to demo.tfvars and fill the subscription id. The scope IDs are the demo
+# landing-zone's management groups (DEMO_TENANT_PLAN §2.3). Real demo.tfvars is
+# gitignored; only this .example is committed.
+#
+# You can also let demo/landing-zone/render-demo-tfvars.sh generate this file
+# from the landing-zone outputs after it is applied (DM-14).
+
+subscription_id = "<sub-demo-management-id>"
+location        = "southeastasia"
+
+name_suffix = ""
+
+role_assignable_scope = "/providers/Microsoft.Management/managementGroups/demo"
+
+in_scope_management_group_ids = [
+  "/providers/Microsoft.Management/managementGroups/demo-landingzones",
+  "/providers/Microsoft.Management/managementGroups/demo-sandbox",
+]
+
+# Platform MG + the nested sandbox exclude (scenario S9). Production is ALSO
+# hard-excluded in the engine via the Environment=Prod subscription tag (BR-003).
+excluded_scope_ids = [
+  "/providers/Microsoft.Management/managementGroups/demo-platform",
+  "/providers/Microsoft.Management/managementGroups/demo-sandbox-excluded",
+]
+
+enabled_resource_types = ["vm", "vmss", "aks", "postgres-flex", "mysql-flex", "sqlmi", "appgw"]
+
+reconcile_schedule  = "0 */15 * * * *" # default; needed for the T-602 count checks
+dry_run             = true             # Phase A; flip to false for Phase B (T-603)
+max_actions_per_run = 200              # temporarily 2 for scenario S14
+
+log_analytics_workspace_id = ""
+alert_email_addresses      = ["<your-demo-alert-email>"]
+
+enable_private_networking = false
+
+tags = {
+  owner       = "demo"
+  cost-centre = "demo"
+  project     = "power-scheduler-demo"
+  managed-by  = "terraform"
+}
