@@ -26,7 +26,7 @@ To run these checks in a disposable demo tenant first, follow
 [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md); its §7 maps each demo scenario to the
 items below.
 
-**Status legend:** ⬜ Not started · 🔍 Pending live check · 🟡 In progress · ✅ Done · ⛔ Blocked
+**Status legend:** ⬜ Not started · 🔴 Open issue (code fix needed) · 🔍 Pending live check · 🟡 In progress · ✅ Done · ⛔ Blocked
 
 ### Tasks
 
@@ -35,7 +35,8 @@ items below.
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ⛔ Blocks T-602 |
 | T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | ⬜ Not started |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 and all live checks below) |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602, all live checks below, and V1 fixed) |
+| V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔴 Open — blocks T-603 |
 
 ### Live checks carried over from the code review
 
@@ -389,3 +390,75 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | Date | Item(s) | Result | Evidence / notes | By |
 |---|---|---|---|---|
 | 2026-10-04 | T-601 | ✅ Pass | Re-run locally at `1eb0498`: 143 passed with pinned SDKs (136 passed, 7 skipped without), strict SDK surface 7 passed, ruff clean. Terraform fmt/validate per the CI job. | Claude |
+| 2026-10-04 | V1 | 🔴 Issue opened | Design gap found during review of AKS start/stop behaviour; see §6.1. Not yet reproduced live (planned as demo scenario S18). | Claude |
+
+### 6.1 Issues found during verification
+
+#### V1 — AKS-managed node pool scale sets are not excluded from scheduling
+
+| | |
+|---|---|
+| **Severity** | High |
+| **Status** | 🔴 Open — code fix needed; blocks T-603 |
+| **Found** | 2026-10-04, review (before live deployment) |
+| **Location** | `src/engine/discovery.py` (`build_kql_query`, `_row_to_record`); `src/engine/selection.py`; `src/engine/models.py` |
+| **Related** | REQUIREMENTS HR-002, §8.1 (`aks`, `vmss` handlers), FR-032 |
+
+**Description.** AKS node pools are virtual machine scale sets that AKS creates
+in the cluster's node resource group (by default `MC_<rg>_<cluster>_<region>`).
+The scheduler is designed to control AKS only through the cluster's own
+stop/start operation (`aks` handler). Discovery does not distinguish
+AKS-managed scale sets from ordinary ones, so if a node pool scale set resolves
+a `schedule-profile` tag, the `vmss` handler will deallocate and start it
+directly. AKS does not support managing node pool VMs this way, and it can
+leave the cluster in a failed or inconsistent state.
+
+A node pool scale set can resolve a profile without anyone tagging it directly:
+
+- the node resource group is tagged (tag inheritance from the RG, FR-013);
+- the subscription carries a `schedule-profile` tag (inheritance from the
+  subscription — `sub-demo-sandbox` does this in the demo);
+- AKS may copy the cluster's tags onto resources in the node resource group
+  (to be confirmed in S18).
+
+**Implementation needed (product code):**
+
+1. **Discovery:** in the resource-group join, also project the resource group's
+   `managedBy` (e.g. `rgManagedBy = managedBy`), and populate a new
+   `ResourceRecord.resource_group_managed_by` field in `_row_to_record`.
+2. **Selection:** before tag resolution, mark a scale set **ineligible** with
+   reason `aks-managed-node-pool` when either:
+   - any of its own tag keys starts with `aks-managed-` (case-insensitive;
+     AKS adds tags such as `aks-managed-poolName`), **or**
+   - its resource group's `managedBy` points to a
+     `Microsoft.ContainerService/managedClusters` resource (case-insensitive).
+
+   Do not rely on the `MC_` name prefix: the node resource group name can be
+   customised.
+3. **Recommended broadening:** treat any VM or scale set whose resource group
+   has a non-empty `managedBy` as ineligible with reason
+   `managed-resource-group`. Such groups are owned by another Azure service
+   (for example AKS or Azure Databricks), which manages those VMs itself.
+4. **Logging:** these resources must produce a decision record with the skip
+   reason (not be silently dropped), so a mis-tagged node resource group is
+   visible in the logs.
+5. **Requirements:** add a handler requirement to REQUIREMENTS §8.2 (e.g.
+   HR-007: "Scale sets and VMs in resource groups managed by another service,
+   including AKS node pools, are never started or stopped directly").
+
+**Acceptance criteria.**
+
+- [ ] Unit tests: scale set with tag `aks-managed-poolName` → `aks-managed-node-pool`;
+  scale set in an RG with `managedBy` = an AKS cluster ID (no AKS tags) →
+  `aks-managed-node-pool`; tag key and `managedBy` matched case-insensitively;
+  ordinary scale set unaffected.
+- [ ] Unit test: VM in an RG managed by a non-AKS service → `managed-resource-group`
+  (if step 3 is adopted).
+- [ ] KQL test asserts the RG join projects `managedBy`.
+- [ ] Live (demo scenario S18): with the AKS node resource group tagged
+  `schedule-profile=weekday-0830-1730`, its scale sets are logged with
+  `aks-managed-node-pool` and never acted on, while the AKS cluster itself is
+  stopped and started by the `aks` handler.
+
+**Interim mitigation until fixed:** never tag AKS node resource groups, and do
+not put a `schedule-profile` tag on a subscription that contains AKS clusters.

@@ -3,7 +3,7 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-001 |
-| Version | 0.3 |
+| Version | 0.4 |
 | Related | [VERIFICATION.md](VERIFICATION.md), [REQUIREMENTS.md](REQUIREMENTS.md), [../README.md](../README.md) |
 | Created | 2026-10-04 |
 | Audience | Implementer (Kiro), platform team, presenter |
@@ -124,7 +124,7 @@ W4 (opt-out), W9 (prod) and W11 (platform) are never stopped by the scheduler, s
 
 | Ref | Resource | Toggle | Tags | Exercises |
 |---|---|---|---|---|
-| W12 | AKS, Free tier, 1 system node `Standard_B2s` | `enable_aks` | Standard (default order 2) | AKS handler, ordering, start guard |
+| W12 | AKS, Free tier, 1 system node `Standard_B2s`; set the node resource group name explicitly (e.g. `rg-demo-aks-nodes`) | `enable_aks` | Standard (default order 2) on the **cluster** only | AKS handler, ordering, start guard, S18 (V1) |
 | W13 | Application Gateway `Standard_v2`, fixed capacity 1 | `enable_appgw` | Standard (default order 2) | appgw handler |
 | W14 | SQL Managed Instance, General Purpose, 4 vCores | `enable_sqlmi` | Standard (default order 1) | sqlmi handler, live check C3 |
 
@@ -229,10 +229,11 @@ All times are **Bangkok time** (UTC+7). With the standard profile, transitions h
 | S13 | Telemetry health | Leave running ≥ 3 hours | Invocations ≈ summaries (Queries 3, 6); no storage errors (Query 4) | M4, N3 |
 | S15 | Alerts | VERIFICATION §5 tests (outside business hours is fine) | Cycle-health and cycle-exceptions alerts fire and notify | H2 |
 | S16 | Past-due recovery | VERIFICATION §3.4 stop/start test | Past-due run logged after restart | M4 |
+| S18 | AKS node pool protection | Requires W12. First check whether AKS copied the cluster's tags onto the node pool scale set in `rg-demo-aks-nodes`. Then tag `rg-demo-aks-nodes` itself `schedule-profile=weekday-0830-1730` and watch 2 cycles; remove the tag afterwards | **Before the V1 fix:** node pool scale sets appear with `action=start/stop` (reproduces V1 safely, because this is dry run). **After the fix:** they appear with `result=aks-managed-node-pool` and no action; the cluster itself is still handled by the `aks` handler | V1 |
 
 ### Phase B — live (`dry_run = false`) — covers T-603
 
-Enable W13 and W14 (if budgeted) at the start of Phase B.
+Enable W13 and W14 (if budgeted) at the start of Phase B. **Do not run Phase B with W12 enabled until V1 is fixed and S18 passes**; until then, set `enable_aks = false` for Phase B.
 
 | ID | Scenario | When / steps | Expected result | Live check |
 |---|---|---|---|---|
@@ -266,6 +267,7 @@ Record every run in the VERIFICATION §6 results log (date, scenario ID, result,
 | N3 | S13 |
 | N4 | S2 |
 | N6 | S1 (Query 1) |
+| V1 | S18 (after the code fix) |
 
 ---
 
@@ -316,6 +318,7 @@ Notes for Kiro:
 | Mixed-case RG name normalised by tooling | Create it with exact casing in Terraform; confirm in the portal before S2 |
 | Elevated access left on | Explicit steps in DM-04 and teardown |
 | Demo data expires | Default 90-day retention; export evidence (DM-42) before teardown |
+| AKS node pools acted on directly (V1) | Phase A only for W12 until V1 is fixed; S18 verifies the fix; never tag the node resource group outside S18 |
 
 ---
 
@@ -326,3 +329,4 @@ Notes for Kiro:
 | 0.1 | 2026-10-04 | Initial plan |
 | 0.2 | 2026-10-04 | No new profiles or product changes: removed the demo-window profile; scenarios now use the real `weekday-0830-1730` / `sandbox-default` windows plus override tags. Demo is logs-only (§8, saved queries). Budget re-planned for a USD 1,000 credit, with Plan B for single-subscription credit offers. Reconcile schedule kept at the 15-minute default. |
 | 0.3 | 2026-10-04 | Management groups and subscriptions renamed to match the target tenant (`demo-workload-np`, `demo-workload-prod`, `sub-demo-workload-*`). Single-subscription fallback (Plan B, DM-22) removed: all four subscriptions use the credit. Added §2.3 note on demo vs. target-tenant scoping and optional DM-15 (prod tag policy). |
+| 0.4 | 2026-10-04 | Added S18 (AKS node pool protection, verifies V1), explicit AKS node resource group name for W12, Phase B gate on V1, and a matching risk row. |
