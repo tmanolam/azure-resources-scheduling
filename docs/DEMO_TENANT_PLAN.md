@@ -63,7 +63,8 @@ No hub network or firewall is needed: the scheduler talks to Azure Resource Mana
 
 ### 2.3 Scheduler configuration for the demo tenant
 
-`demo/scheduler/demo.tfvars` (used with `infra/scheduler` exactly as shipped):
+`infra/tenants/demo.tfvars` (deployed with `./infra/deploy.sh demo`, which uses
+`infra/scheduler` exactly as shipped):
 
 | Variable | Demo value | Why |
 |---|---|---|
@@ -179,7 +180,7 @@ demo/
 | DM-11 | Place subscriptions in MGs (§2.1) | Each subscription under its MG |
 | DM-12 | Subscription tags (§2.1), including `Environment=Prod` on prod and `schedule-profile=sandbox-default` on sandbox | `az tag list --resource-id /subscriptions/<id>` shows them. Use `azapi` (`Microsoft.Resources/tags`) or `az tag update`; azurerm has no first-class subscription tag resource. |
 | DM-13 | Budgets with email alerts at USD 250 / 500 / 750 on the credit subscription(s) | Visible in Cost Management |
-| DM-14 | Outputs: MG and subscription IDs; a script renders `demo/scheduler/demo.tfvars` from them | `demo.tfvars` matches §2.3 |
+| DM-14 | Outputs: MG and subscription IDs; a script renders `infra/tenants/demo.tfvars` from them | `demo.tfvars` matches §2.3 |
 
 Optional (DM-15): assign an Azure Policy at `demo-workload-prod` that requires the `environment` tag with value `prod` on subscriptions, modelling assumption A-08 for the target tenant.
 

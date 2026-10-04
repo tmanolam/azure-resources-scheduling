@@ -99,15 +99,10 @@ resource "azurerm_mysql_flexible_server" "w8" {
   version                = "8.0.21"
   zone                   = "1"
 
-  # DR-07: unlike PostgreSQL flexible server, azurerm's
-  # azurerm_mysql_flexible_server treats public_network_access_enabled as a
-  # COMPUTED attribute — it cannot be set to false directly on the public-access
-  # connectivity method (hashicorp/terraform-provider-azurerm#26156). Fully
-  # disabling public access requires private link (a delegated subnet + private
-  # DNS zone), which is disproportionate for a cost-controlled demo DB. With no
-  # firewall rules created here, the server denies all inbound by default, so it
-  # is not reachable; the public endpoint simply exists. Documented as an
-  # accepted deviation from DM-23 for MySQL only.
+  # DR-07: disable the public endpoint (parity with PostgreSQL W7). azurerm
+  # 4.81.0 exposes public_network_access as a settable Enabled/Disabled
+  # attribute on MySQL flexible server (verified against the pinned provider).
+  public_network_access = "Disabled"
 
   tags = {
     "schedule-profile" = var.standard_profile

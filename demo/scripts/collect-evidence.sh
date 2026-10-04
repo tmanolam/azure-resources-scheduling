@@ -32,17 +32,22 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SCHED_DIR="$REPO_ROOT/infra/scheduler"
 QUERIES_DIR="$REPO_ROOT/demo/queries"
 
-# Resolve App Insights name + RG from Terraform outputs if not given.
-if [[ -z "$APPI" ]]; then
-  APPI="$(terraform -chdir="$SCHED_DIR" output -raw application_insights_name 2>/dev/null || true)"
+# DR-14: resolve App Insights name + RG from the DEMO scheduler outputs. Use the
+# per-tenant wrapper so the DEMO backend is (re)initialised first — a bare
+# `terraform -chdir=infra/scheduler output` would read whatever backend that
+# folder was last initialised with (possibly another tenant), pointing the
+# evidence queries at the wrong Application Insights.
+if [[ -z "$APPI" || -z "$RG" ]]; then
+  if [[ -x "$REPO_ROOT/infra/deploy.sh" ]]; then
+    DEMO_OUT="$("$REPO_ROOT/infra/deploy.sh" demo output 2>/dev/null || true)"
+    # deploy.sh demo output prints `name = "value"` lines; extract the two we need.
+    [[ -z "$APPI" ]] && APPI="$(sed -n 's/^application_insights_name *= *"\(.*\)"$/\1/p' <<<"$DEMO_OUT" | head -1)"
+    [[ -z "$RG" ]]   && RG="$(sed -n 's/^resource_group_name *= *"\(.*\)"$/\1/p' <<<"$DEMO_OUT" | head -1)"
+  fi
 fi
-if [[ -z "$RG" ]]; then
-  RG="$(terraform -chdir="$SCHED_DIR" output -raw resource_group_name 2>/dev/null || true)"
-fi
-[[ -n "$APPI" && -n "$RG" ]] || die "Could not resolve App Insights/RG. Pass --app and --rg."
+[[ -n "$APPI" && -n "$RG" ]] || die "Could not resolve App Insights/RG. Pass --app and --rg (or ensure ./infra/deploy.sh demo output works)."
 
 OUT_DIR="$REPO_ROOT/demo/evidence/$(date +%Y-%m-%d)-$LABEL"
 mkdir -p "$OUT_DIR"
