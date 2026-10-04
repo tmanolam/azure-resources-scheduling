@@ -18,7 +18,7 @@ from engine.selection import select_resources  # noqa: E402
 
 
 def _row(rid, rtype, sub="s1", rg="rg1", tags=None, rg_tags=None, sub_tags=None,
-         with_sub_container=True):
+         with_sub_container=True, rg_managed_by=None):
     """Build a raw Resource Graph row shaped like the joined query output.
 
     ``with_sub_container=False`` simulates the subscription container row not
@@ -33,6 +33,7 @@ def _row(rid, rtype, sub="s1", rg="rg1", tags=None, rg_tags=None, sub_tags=None,
         "location": "southeastasia",
         "tags": tags if tags is not None else {"schedule-profile": "weekday-0830-1730"},
         "resourceGroupTags": rg_tags or {},
+        "rgManagedBy": rg_managed_by,
     }
     if with_sub_container:
         row["subId"] = sub
@@ -82,6 +83,14 @@ def test_build_kql_lowercases_both_sides_of_rg_join():
     assert "rgKey = tolower(resourceGroup)" in q
     assert "rgName = tolower(name)" in q
     assert "$left.rgKey == $right.rgName" in q
+
+
+def test_build_kql_projects_rg_managed_by():
+    # V1 / HR-007: the RG container join must project managedBy so selection can
+    # detect AKS-managed node resource groups.
+    q = build_kql_query(["vmss"])
+    assert "rgManagedBy = managedBy" in q
+    assert "rgManagedBy" in q.split("| project")[-1]  # kept in final projection
 
 
 def test_build_kql_projects_power_state():
@@ -247,3 +256,52 @@ def test_c2_tag_precedence_resource_over_rg_over_sub_end_to_end():
     results = select_resources([rec], enabled_handler_keys=["vm"])
     assert results[0].eligible is True
     assert results[0].profile_name == "res-prof"
+
+
+# --- V1 / HR-007 end-to-end: discovery populates managedBy, selection excludes
+
+_VMSS_RID = ("/subscriptions/s1/resourceGroups/mc-rg/providers/"
+             "Microsoft.Compute/virtualMachineScaleSets/aks-sys-123")
+_VMSS_TYPE = "Microsoft.Compute/virtualMachineScaleSets"
+_AKS_CLUSTER_ID = ("/subscriptions/s1/resourcegroups/rg-app/providers/"
+                   "Microsoft.ContainerService/managedClusters/aks-demo")
+
+
+def _discover_one_vmss(row):
+    recs = discover_resources(lambda q, s, t: QueryPage([row], None),
+                              include_scopes=["mg"], enabled_handler_keys=["vmss"])
+    assert len(recs) == 1
+    return recs[0]
+
+
+def test_v1_discovery_populates_rg_managed_by():
+    rec = _discover_one_vmss(_row(_VMSS_RID, _VMSS_TYPE, rg="mc-rg",
+                                  tags={"schedule-profile": "weekday-0830-1730"},
+                                  rg_managed_by=_AKS_CLUSTER_ID))
+    assert rec.resource_group_managed_by == _AKS_CLUSTER_ID
+
+
+def test_v1_node_pool_excluded_end_to_end_via_managed_rg():
+    # The node resource group is tagged with a profile (inheritance), but the RG
+    # is managedBy an AKS cluster -> excluded as aks-managed-node-pool, never
+    # scheduled, and logged (not dropped).
+    rec = _discover_one_vmss(_row(_VMSS_RID, _VMSS_TYPE, rg="mc-rg",
+                                  tags={},
+                                  rg_tags={"schedule-profile": "weekday-0830-1730"},
+                                  rg_managed_by=_AKS_CLUSTER_ID))
+    results = select_resources([rec], enabled_handler_keys=["vmss"])
+    assert len(results) == 1
+    assert results[0].eligible is False
+    assert results[0].reason == "aks-managed-node-pool"
+
+
+def test_v1_node_pool_excluded_end_to_end_via_aks_tag():
+    # AKS copied cluster tags / adds aks-managed-* onto the scale set; excluded
+    # even if the RG managedBy were not readable.
+    rec = _discover_one_vmss(_row(_VMSS_RID, _VMSS_TYPE, rg="mc-rg",
+                                  tags={"schedule-profile": "weekday-0830-1730",
+                                        "aks-managed-poolName": "sys"},
+                                  rg_managed_by=None))
+    results = select_resources([rec], enabled_handler_keys=["vmss"])
+    assert results[0].eligible is False
+    assert results[0].reason == "aks-managed-node-pool"

@@ -110,7 +110,7 @@ def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
         "ResourceContainers "
         "| where tolower(type) == 'microsoft.resources/subscriptions/resourcegroups' "
         "| project rgSubId = subscriptionId, rgName = tolower(name), "
-        "resourceGroupTags = tags"
+        "resourceGroupTags = tags, rgManagedBy = managedBy"
         ") on $left.subscriptionId == $right.rgSubId "
         "and $left.rgKey == $right.rgName "
         # Join the subscription container to pick up subscription-level tags.
@@ -140,7 +140,7 @@ def build_kql_query(enabled_handler_keys: Sequence[str]) -> str:
         "properties.operationalState"                           # appgw
         ")) "
         "| project id, type, subscriptionId, resourceGroup, location, tags, "
-        "resourceGroupTags, subscriptionTags, subId, mgChain, powerState"
+        "resourceGroupTags, subscriptionTags, subId, mgChain, powerState, rgManagedBy"
     )
 
 
@@ -234,6 +234,15 @@ def _row_to_record(row: Mapping[str, object]) -> Optional[ResourceRecord]:
     # as production-safe.
     subscription_seen = row.get("subId") is not None
 
+    # V1 / HR-007: the owning resource group's managedBy. A non-empty value
+    # means another Azure service owns the RG (e.g. an AKS node resource group,
+    # whose managedBy is the managedClusters resource id). Selection uses this
+    # to exclude node pool scale sets / managed-RG VMs from direct scheduling.
+    managed_by_raw = row.get("rgManagedBy")
+    resource_group_managed_by = (
+        str(managed_by_raw).strip() if isinstance(managed_by_raw, str) else ""
+    )
+
     return ResourceRecord(
         resource_id=resource_id,
         resource_type=resource_type,
@@ -245,6 +254,7 @@ def _row_to_record(row: Mapping[str, object]) -> Optional[ResourceRecord]:
         subscription_tags=subscription_tags,
         resource_group_tags=resource_group_tags,
         subscription_container_seen=subscription_seen,
+        resource_group_managed_by=resource_group_managed_by,
         power_state=_coerce_power_state(row.get("powerState")),
         mg_chain=_coerce_mg_chain(row.get("mgChain")),
     )

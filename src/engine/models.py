@@ -65,6 +65,12 @@ class ResourceRecord:
             subscription container row (resourcecontainers join). When False,
             subscription tags could not be read and selection must fail safe
             (treat as ineligible rather than assume non-production) — C1.
+        resource_group_managed_by: The owning resource group's ``managedBy``
+            property (empty when none). A non-empty value means another Azure
+            service owns the RG and manages the VMs/scale sets inside it — most
+            importantly AKS node resource groups. Used to exclude AKS node pool
+            scale sets and other managed-RG resources from direct scheduling
+            (V1 / HR-007).
         power_state: Actual power/operational state read from Resource Graph at
             discovery time (M1), so planning avoids a per-resource ARM call.
             Empty when unavailable (engine falls back to a handler read).
@@ -83,6 +89,7 @@ class ResourceRecord:
     subscription_tags: Mapping[str, str] = field(default_factory=dict)
     resource_group_tags: Mapping[str, str] = field(default_factory=dict)
     subscription_container_seen: bool = True
+    resource_group_managed_by: str = ""
     power_state: str = ""
     mg_chain: tuple[str, ...] = ()
 

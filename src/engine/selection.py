@@ -10,6 +10,10 @@ resolving tags and applying the hard safety rules:
 - BR-002  Opt-in only: a resource must resolve a schedule-profile tag.
 - BR-003  Production hard-exclusion: subscription tagged environment=prod is
           always skipped with reason 'production-excluded'. No opt-in exists.
+- V1/HR-007 Managed resource groups: scale sets / VMs that another service owns
+          (AKS node pools, or any RG with a non-empty managedBy) are skipped with
+          reason 'aks-managed-node-pool' or 'managed-resource-group' and never
+          acted on directly.
 - C1      Fail-safe: when the subscription container could not be read during
           discovery (subscription_container_seen=False), the resource is skipped
           with reason 'subscription-tags-unavailable' rather than assumed
@@ -46,6 +50,17 @@ TAG_ORDER = "schedule-order"
 # Production marker (BR-003, A-08).
 ENV_TAG = "environment"
 PROD_ENV_VALUE = "prod"
+
+# V1 / HR-007: AKS adds tags prefixed ``aks-managed-`` (e.g. aks-managed-poolName)
+# to the node pool scale sets it owns. The AKS node resource group's ``managedBy``
+# points at the owning cluster. Scale sets / VMs in a managed resource group must
+# never be started or stopped directly.
+AKS_MANAGED_TAG_PREFIX = "aks-managed-"
+AKS_CLUSTER_TYPE = "microsoft.containerservice/managedclusters"
+
+# Handler keys whose resources live inside resource groups that another service
+# may own (AKS node pools are scale sets; some services also create VMs).
+_MANAGED_RG_HANDLER_KEYS = frozenset({"vm", "vmss"})
 
 
 @dataclass(frozen=True)
@@ -115,6 +130,48 @@ def _is_under_excluded_scope(resource: ResourceRecord, exclude_scopes: Sequence[
     return None
 
 
+def _managed_rg_exclusion_reason(resource: ResourceRecord) -> Optional[str]:
+    """Return a skip reason if the resource is managed by another service (V1/HR-007).
+
+    AKS node pools are virtual machine scale sets that AKS creates in the
+    cluster's node resource group and manages itself; starting or stopping them
+    directly can corrupt the cluster. More generally, a resource group with a
+    non-empty ``managedBy`` is owned by another Azure service (AKS, Databricks,
+    etc.), which manages the VMs/scale sets inside it.
+
+    Only applies to VM / scale-set handlers; the AKS cluster resource itself is
+    still scheduled through the ``aks`` handler. Returns:
+
+    - ``"aks-managed-node-pool"`` when the resource carries an ``aks-managed-*``
+      tag key (case-insensitive) OR its RG ``managedBy`` references an AKS
+      managed cluster;
+    - ``"managed-resource-group"`` when the RG has any other non-empty
+      ``managedBy``;
+    - ``None`` otherwise.
+
+    The ``MC_`` node-RG name prefix is deliberately NOT used, because the node
+    resource group name can be customised.
+    """
+    if resource.handler_key not in _MANAGED_RG_HANDLER_KEYS:
+        return None
+
+    # (a) AKS-managed tag key on the resource itself (case-insensitive).
+    for k in (resource.tags or {}):
+        if str(k).lower().startswith(AKS_MANAGED_TAG_PREFIX):
+            return "aks-managed-node-pool"
+
+    managed_by = (resource.resource_group_managed_by or "").strip()
+    if not managed_by:
+        return None
+
+    # (b) RG managedBy references an AKS managed cluster (case-insensitive).
+    if AKS_CLUSTER_TYPE in managed_by.lower():
+        return "aks-managed-node-pool"
+
+    # (c) RG owned by some other service.
+    return "managed-resource-group"
+
+
 def _parse_order(value: Optional[str]) -> Optional[int]:
     if value is None:
         return None
@@ -171,6 +228,17 @@ def select_resources(
         # FR-012: disabled resource type.
         if r.handler_key not in enabled:
             results.append(SelectionResult(r, False, "type-not-enabled"))
+            continue
+
+        # V1 / HR-007: never act directly on scale sets / VMs that another
+        # service manages (AKS node pools, or any managed resource group). This
+        # is a hard safety rule, so it is checked before opt-in resolution: a
+        # mis-tagged node resource group must be skipped (and logged), not
+        # scheduled. Checked after the type gate so disabled types still report
+        # 'type-not-enabled'.
+        managed_reason = _managed_rg_exclusion_reason(r)
+        if managed_reason is not None:
+            results.append(SelectionResult(r, False, managed_reason))
             continue
 
         # FR-021: explicit opt-out.

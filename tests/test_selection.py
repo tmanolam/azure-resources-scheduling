@@ -14,11 +14,13 @@ from engine.selection import resolve_effective_tags, select_resources  # noqa: E
 
 
 def _vm(rid="/subscriptions/s1/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1",
-        sub="s1", tags=None, rg_tags=None, sub_tags=None, handler="vm", rtype="Microsoft.Compute/virtualMachines"):
+        sub="s1", tags=None, rg_tags=None, sub_tags=None, handler="vm", rtype="Microsoft.Compute/virtualMachines",
+        rg_managed_by=""):
     return ResourceRecord(
         resource_id=rid, resource_type=rtype, handler_key=handler,
         subscription_id=sub, resource_group="rg1",
         tags=tags or {}, resource_group_tags=rg_tags or {}, subscription_tags=sub_tags or {},
+        resource_group_managed_by=rg_managed_by,
     )
 
 
@@ -157,3 +159,99 @@ def test_mg_exclude_not_in_chain_is_ignored():
     s = _one(select_resources([r], enabled_handler_keys=["vm"],
                               exclude_scopes=["/providers/Microsoft.Management/managementGroups/org-platform"]))
     assert s.eligible is True
+
+
+# --- V1 / HR-007: AKS-managed node pools and managed resource groups ---------
+
+_VMSS_RID = "/subscriptions/s1/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachineScaleSets/aks-sys-123"
+_VMSS_TYPE = "Microsoft.Compute/virtualMachineScaleSets"
+_AKS_CLUSTER_ID = (
+    "/subscriptions/s1/resourcegroups/rg-app/providers/"
+    "Microsoft.ContainerService/managedClusters/aks-demo"
+)
+
+
+def test_v1_scale_set_with_aks_managed_tag_excluded():
+    # Acceptance: scale set with tag aks-managed-poolName -> aks-managed-node-pool.
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "weekday-0830-1730", "aks-managed-poolName": "sys"})
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is False
+    assert s.reason == "aks-managed-node-pool"
+
+
+def test_v1_scale_set_in_aks_managed_rg_excluded_without_tags():
+    # Acceptance: scale set in an RG whose managedBy is an AKS cluster id, with
+    # NO aks-managed tags -> aks-managed-node-pool.
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "weekday-0830-1730"},
+            rg_managed_by=_AKS_CLUSTER_ID)
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is False
+    assert s.reason == "aks-managed-node-pool"
+
+
+def test_v1_aks_managed_tag_key_case_insensitive():
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "p", "AKS-Managed-PoolName": "sys"})
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is False
+    assert s.reason == "aks-managed-node-pool"
+
+
+def test_v1_aks_managed_by_case_insensitive():
+    # managedBy with different casing of the type still matches.
+    managed = _AKS_CLUSTER_ID.replace("Microsoft.ContainerService", "MICROSOFT.containerservice")
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "p"}, rg_managed_by=managed)
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is False
+    assert s.reason == "aks-managed-node-pool"
+
+
+def test_v1_vm_in_non_aks_managed_rg_is_managed_resource_group():
+    # Acceptance (step 3): VM in an RG managed by a non-AKS service ->
+    # managed-resource-group.
+    r = _vm(tags={"schedule-profile": "p"},
+            rg_managed_by="/subscriptions/s1/resourceGroups/dbx/providers/"
+                          "Microsoft.Databricks/workspaces/ws1")
+    s = _one(select_resources([r], enabled_handler_keys=["vm"]))
+    assert s.eligible is False
+    assert s.reason == "managed-resource-group"
+
+
+def test_v1_ordinary_scale_set_unaffected():
+    # Acceptance: an ordinary scale set (no aks tags, no managedBy) is eligible.
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "weekday-0830-1730"})
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is True
+
+
+def test_v1_aks_cluster_itself_still_schedulable():
+    # The AKS cluster resource (aks handler) must NOT be caught by HR-007 even if
+    # its own RG were (hypothetically) managed; the rule only targets vm/vmss.
+    r = _vm(rid=_AKS_CLUSTER_ID, rtype="Microsoft.ContainerService/managedClusters",
+            handler="aks", tags={"schedule-profile": "weekday-0830-1730"},
+            rg_managed_by="")
+    s = _one(select_resources([r], enabled_handler_keys=["aks"]))
+    assert s.eligible is True
+
+
+def test_v1_production_still_wins_over_managed_rg():
+    # Ordering: a prod-subscription node pool reports production-excluded (the
+    # stronger safety reason), not aks-managed-node-pool.
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "p", "aks-managed-poolName": "sys"},
+            sub_tags={"environment": "prod"})
+    s = _one(select_resources([r], enabled_handler_keys=["vmss"]))
+    assert s.eligible is False
+    assert s.reason == "production-excluded"
+
+
+def test_v1_type_not_enabled_still_wins_over_managed_rg():
+    r = _vm(rid=_VMSS_RID, rtype=_VMSS_TYPE, handler="vmss",
+            tags={"schedule-profile": "p"}, rg_managed_by=_AKS_CLUSTER_ID)
+    s = _one(select_resources([r], enabled_handler_keys=["vm"]))  # vmss NOT enabled
+    assert s.eligible is False
+    assert s.reason == "type-not-enabled"

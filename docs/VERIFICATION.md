@@ -36,7 +36,7 @@ items below.
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ⛔ Blocks T-602 |
 | T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | ⬜ Not started |
 | T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602, all live checks below, and V1 fixed) |
-| V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔴 Open — blocks T-603 |
+| V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18) |
 
 ### Live checks carried over from the code review
 
@@ -391,6 +391,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 |---|---|---|---|---|
 | 2026-10-04 | T-601 | ✅ Pass | Re-run locally at `1eb0498`: 143 passed with pinned SDKs (136 passed, 7 skipped without), strict SDK surface 7 passed, ruff clean. Terraform fmt/validate per the CI job. | Claude |
 | 2026-10-04 | V1 | 🔴 Issue opened | Design gap found during review of AKS start/stop behaviour; see §6.1. Not yet reproduced live (planned as demo scenario S18). | Claude |
+| 2026-10-04 | V1 | 🔍 Fixed in code | discovery projects RG `managedBy` (`rgManagedBy`) and populates `ResourceRecord.resource_group_managed_by`; selection excludes `vm`/`vmss` with reason `aks-managed-node-pool` (an `aks-managed-*` tag key or RG `managedBy` → `managedClusters`, both case-insensitive) or `managed-resource-group` (other non-empty `managedBy`), before opt-in so it is logged; HR-007 added to REQUIREMENTS §8.2. Tests: 13 new (9 selection + 4 discovery). Suite **149 passed / 7 skipped**, ruff clean. Live criterion remains for demo scenario S18. | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -399,7 +400,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | | |
 |---|---|
 | **Severity** | High |
-| **Status** | 🔴 Open — code fix needed; blocks T-603 |
+| **Status** | 🔍 Fixed at code level (2026-10-04) — live criterion pending demo scenario S18 (then → Closed) |
 | **Found** | 2026-10-04, review (before live deployment) |
 | **Location** | `src/engine/discovery.py` (`build_kql_query`, `_row_to_record`); `src/engine/selection.py`; `src/engine/models.py` |
 | **Related** | REQUIREMENTS HR-002, §8.1 (`aks`, `vmss` handlers), FR-032 |
@@ -448,13 +449,14 @@ A node pool scale set can resolve a profile without anyone tagging it directly:
 
 **Acceptance criteria.**
 
-- [ ] Unit tests: scale set with tag `aks-managed-poolName` → `aks-managed-node-pool`;
+- [x] Unit tests: scale set with tag `aks-managed-poolName` → `aks-managed-node-pool`;
   scale set in an RG with `managedBy` = an AKS cluster ID (no AKS tags) →
   `aks-managed-node-pool`; tag key and `managedBy` matched case-insensitively;
-  ordinary scale set unaffected.
-- [ ] Unit test: VM in an RG managed by a non-AKS service → `managed-resource-group`
-  (if step 3 is adopted).
-- [ ] KQL test asserts the RG join projects `managedBy`.
+  ordinary scale set unaffected. *(tests/test_selection.py: `test_v1_*`)*
+- [x] Unit test: VM in an RG managed by a non-AKS service → `managed-resource-group`
+  (step 3 adopted). *(`test_v1_vm_in_non_aks_managed_rg_is_managed_resource_group`)*
+- [x] KQL test asserts the RG join projects `managedBy`.
+  *(tests/test_discovery.py: `test_build_kql_projects_rg_managed_by`)*
 - [ ] Live (demo scenario S18): with the AKS node resource group tagged
   `schedule-profile=weekday-0830-1730`, its scale sets are logged with
   `aks-managed-node-pool` and never acted on, while the AKS cluster itself is

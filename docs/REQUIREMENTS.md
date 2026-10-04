@@ -269,6 +269,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | HR-004 | All database types with a stop operation are in scope, including high-availability servers and servers with read replicas (decision D-04). Where the platform rejects a stop or start because of HA or replica configuration, the handler shall log the reason, skip the resource, and not retry it until its configuration changes. Behaviour is validated during the pilot. |
 | HR-005 | Each handler shall be a separate module implementing a common interface (`get_state`, `start`, `stop`) so new types can be added without changing the core engine. |
 | HR-006 | Azure SQL Database is out of scope (decision D-08). No handler is built; the type is not queried, so tagging these databases has no effect. |
+| HR-007 | Managed resource groups: scale sets and VMs in a resource group owned by another Azure service (non-empty `managedBy`), including AKS node pools, shall never be started or stopped directly. The engine shall mark such resources ineligible — reason `aks-managed-node-pool` when a tag key starts with `aks-managed-` (case-insensitive) or the RG `managedBy` references a `Microsoft.ContainerService/managedClusters` resource, otherwise `managed-resource-group` — and shall log a decision record for them. AKS is controlled only through the cluster's own stop/start (the `aks` handler); the `MC_` node-RG name prefix is not relied on because it can be customised. (Found as verification issue V1.) |
 
 ## 9. Business Rules
 
