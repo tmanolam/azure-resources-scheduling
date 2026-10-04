@@ -126,7 +126,7 @@ Platform MG. The only MG assignments must be at `in_scope_management_group_ids`.
 **Checkpoint — publish:** the publish log ends with:
 
 ```
-Functions in func-pwrsched:
+Functions in func-pwrsched-<suffix>:
     reconcile - [timerTrigger]
 ```
 
@@ -152,6 +152,112 @@ Verify:
 
 If anything is wrong, fix config (tags / `terraform.tfvars` / profiles) and
 re-apply; the engine is idempotent, so no cleanup is needed.
+
+### 3.4 Live verification of review findings
+
+Several review findings are fixed in code but can only be proven on a deployed
+app (status 🔍 in [REVIEW_FINDINGS.md](REVIEW_FINDINGS.md)). Run these checks
+during the dry run, then update each finding's status and the status log.
+Let the scheduler run for **at least 3 hours** before the count-based checks.
+
+Set up once:
+
+```bash
+APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
+RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
+FUNC_APP=$(terraform -chdir=../infra/scheduler output -raw function_app_name)
+q() { az monitor app-insights query --app "$APPI" --resource-group "$RG" --analytics-query "$1" -o table; }
+```
+
+| Finding | Check | Pass condition |
+|---|---|---|
+| C1 | Production exclusion on a real prod subscription | Covered by §3.3: `result = production-excluded`, never acted on |
+| H1 | Decision records carry every OBS-001 field | Query 1 returns rows with no empty columns (except `error`) |
+| N6 | Booleans are lowercase | Query 1 shows `dryRun = true` (not `True`) |
+| C3 | SQL MI state is read correctly with the 4.x SDK | Query 2: every `sqlmi` row has `actualState` `Running` or `Stopped`, never `Unknown` |
+| M4 | Timer fires on schedule with identity-based host storage | Query 3: about 4 invocations per hour; Query 4 returns no storage auth errors |
+| M4 | Past-due recovery (FR-007) | After the stop/start test below, Query 5 shows a past-due run |
+| N3 | Telemetry is flushed every cycle | Query 3 and Query 6 counts match for the same window |
+| N4 | Mixed-case resource group inheritance | Query 7 shows the test VM with the RG's profile |
+
+**Query 1 — decision fields (H1, N6):**
+
+```bash
+q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| project runId = customDimensions["pwrsched.runId"], resourceId = customDimensions["pwrsched.resourceId"],
+  type = customDimensions["pwrsched.type"], profile = customDimensions["pwrsched.profile"],
+  desiredState = customDimensions["pwrsched.desiredState"], actualState = customDimensions["pwrsched.actualState"],
+  action = customDimensions["pwrsched.action"], dryRun = customDimensions["pwrsched.dryRun"],
+  result = customDimensions["pwrsched.result"], error = customDimensions["pwrsched.error"] | take 20'
+```
+
+**Query 2 — SQL MI state (C3):** needs at least one tagged SQL MI in scope.
+
+```bash
+q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.type"]) =~ "Microsoft.Sql/managedInstances"
+| summarize count() by actualState = tostring(customDimensions["pwrsched.actualState"])'
+```
+
+**Query 3 — invocations per hour (M4, N3):**
+
+```bash
+q 'requests | where timestamp > ago(3h) | where operation_Name == "reconcile"
+| summarize invocations = count() by bin(timestamp, 1h)'
+```
+
+**Query 4 — host storage errors (M4):**
+
+```bash
+q 'traces | where timestamp > ago(3h) | where severityLevel >= 3
+| where message has_any ("AzureWebJobsStorage", "Storage", "lease", "AuthorizationPermissionMismatch")
+| project timestamp, message | take 20'
+```
+
+**Past-due test (M4):** stop the app for longer than one interval, then start it.
+
+```bash
+az functionapp stop -g "$RG" -n "$FUNC_APP"
+sleep 1200   # 20 minutes
+az functionapp start -g "$RG" -n "$FUNC_APP"
+```
+
+**Query 5 — past-due run (M4):** run about 5 minutes after the restart.
+
+```bash
+q 'traces | where timestamp > ago(30m) | where message startswith "pwrsched: timer past due" | project timestamp, message'
+```
+
+**Query 6 — summaries per hour (N3):** compare with Query 3 for the same hours.
+
+```bash
+q 'traces | where timestamp > ago(3h) | where customDimensions["pwrsched.event"] == "pwrsched.summary"
+| summarize summaries = count() by bin(timestamp, 1h)'
+```
+
+**Mixed-case RG test (N4):** create a resource group with a mixed-case name in
+an in-scope, non-production subscription (for example `RG-PwrSched-CaseTest`),
+put one small VM with no schedule tags of its own in it, and tag **only the resource group** with
+`schedule-profile=weekday-0830-1730`. Delete the resource group after the test.
+
+**Query 7 — RG inheritance (N4):**
+
+```bash
+q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.resourceId"]) contains "RG-PwrSched-CaseTest"
+| project resourceId = customDimensions["pwrsched.resourceId"], profile = customDimensions["pwrsched.profile"],
+  result = customDimensions["pwrsched.result"]'
+```
+
+Checklist:
+
+- [ ] H1 and N6: Query 1 passes
+- [ ] C3: Query 2 passes (or recorded as "not tested: no SQL MI in scope")
+- [ ] M4: Query 3 shows about 4 invocations per hour, Query 4 is empty, Query 5 shows a past-due run
+- [ ] N3: Query 3 and Query 6 counts match
+- [ ] N4: Query 7 shows `profile = weekday-0830-1730`
+- [ ] H2: both alert tests in [section 5](#5-alert-verification-obs-003004005) fire
+- [ ] Statuses and status log updated in `REVIEW_FINDINGS.md`
 
 ---
 
@@ -189,6 +295,7 @@ The alert rules key on telemetry events the engine emits:
 | Alert | Event / condition |
 |---|---|
 | OBS-003 cycle health | absence of `pwrsched.summary` for > 45 min |
+| OBS-003 cycle exceptions | an `exceptions` row for operation `reconcile` |
 | OBS-004 repeated failures | `pwrsched.decision` with `result == "failed"` for the same `resourceId` across 3 runs |
 | OBS-005 cap reached | a `pwrsched.capReached` event |
 
@@ -196,3 +303,26 @@ Field alignment between emitted telemetry and the alert/README KQL is checked by
 the unit tests (`tests/test_telemetry.py`) and was verified to have **0 gaps**.
 To exercise an alert in a test tenant, temporarily lower `max_actions_per_run`
 to force a `pwrsched.capReached` event and confirm the action group fires.
+
+**Finding H2 — prove both OBS-003 alerts fire** (do this during the dry run, in
+dry-run mode, and restore afterwards):
+
+1. **Cycle health:** set `scheduler_enabled = false` in tfvars and apply. Wait at
+   least 60 minutes (45-minute window plus one evaluation). Confirm the
+   `<prefix>-cycle-health` alert fires and the action group notifies. Set
+   `scheduler_enabled = true` and apply.
+2. **Cycle exceptions:** make one cycle throw by pointing it at an invalid App
+   Configuration endpoint:
+
+   ```bash
+   az functionapp config appsettings set -g "$RG" -n "$FUNC_APP" \
+     --settings APP_CONFIG_ENDPOINT=https://invalid.azconfig.io
+   ```
+
+   After the next cycle, confirm the `<prefix>-cycle-exceptions` alert fires.
+   Then run `terraform apply` to restore the correct endpoint, and confirm the
+   next cycle succeeds.
+
+- [ ] Cycle-health alert fired and notified
+- [ ] Cycle-exceptions alert fired and notified
+- [ ] Settings restored; `terraform plan` shows no changes

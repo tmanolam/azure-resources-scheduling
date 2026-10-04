@@ -4,10 +4,10 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-REVIEW-001 |
 | Related | [REQUIREMENTS.md](REQUIREMENTS.md) (v0.4), [PHASE1_TASKS.md](PHASE1_TASKS.md), [VERIFICATION.md](VERIFICATION.md) |
-| Reviewed commit | Round 1: `f081718` · Round 2 (re-review of fixes): `014300e` (PR #1, fix commit `65b6a1e`) |
+| Reviewed commit | Round 1: `f081718` · Round 2: `014300e` (PR #1, fix commit `65b6a1e`) · Round 3: `1007a59` |
 | Review date | 2026-10-03 |
 | Scope | `src/`, `infra/`, `config/`, `tests/`, `.github/workflows/ci.yml`, docs |
-| Overall verdict | **Round 2: OK to proceed to T-602 (dry run); fix N1 and N2 before T-603 (go-live).** 19 of the 22 round-1 findings are closed and verified in code; C1 is reopened because its fail-safe does not work against real Resource Graph output (N1); H1 and M4 are fixed in code but need live verification in T-602. Round 2 added 7 findings (N1–N7). Re-run with pinned SDKs: pytest 133 passed, ruff clean. |
+| Overall verdict | **Round 3: all findings are closed at the code level. Proceed to T-602 (dry run).** Of the 29 findings across rounds 1–2, 26 are closed and 3 (H1, M4, N3) are fixed in code but need live verification. Live checks for those, plus the live criteria of C1, C3, H2 and N4, are in [VERIFICATION.md §3.4](VERIFICATION.md#34-live-verification-of-review-findings) and §5. Go-live (T-603) requires those checks to pass. Re-run at `1007a59`: pytest 143 passed with pinned SDKs, strict SDK-surface test passes, ruff clean. |
 
 > **How to use this document:** Each finding has an ID, severity, location, evidence, a recommended fix and acceptance criteria. When a finding is fixed, update its **Status**, fill in **Resolved in** (commit or PR) and add a line to the [Status log](#status-log). Do not delete findings; mark them `Closed` or `Won't fix` with a reason.
 
@@ -21,7 +21,7 @@
 
 | ID | Severity | Title | Requirements affected | Status | Resolved in |
 |---|---|---|---|---|---|
-| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | 🔴 Reopened → N1 | discovery/selection/RBAC fix · `65b6a1e` (PR #1) |
+| C1 | Critical | Production exclusion never triggers | BR-003, US-07, A-08 | ✅ Closed (verify in T-602) | discovery/selection/RBAC fix · `65b6a1e` (PR #1); fail-safe via N1 · `1007a59` |
 | C2 | Critical | Resource group and subscription tags are ignored | FR-013, FR-025, US-06 | ✅ Closed | discovery `resourcecontainers` join · `65b6a1e` (PR #1) |
 | C3 | Critical | SQL Managed Instance handler cannot start or stop | §8.1 `sqlmi`, D-04 | ✅ Closed | `azure-mgmt-sql==4.0.0` + surface test · `65b6a1e` (PR #1) |
 | H1 | High | Decision data probably does not reach Application Insights | OBS-001, OBS-002, OBS-003–005 | 🔍 Fixed, verify in T-602 | OTel flat attributes + KQL aligned · `65b6a1e` (PR #1) |
@@ -44,19 +44,19 @@
 | L5 | Low | Lint issues; no linter in CI | — | ✅ Closed | ruff clean + CI job + ruff.toml · `65b6a1e` (PR #1) |
 | L6 | Low | Task log overstates completion; profiles shared across tenants | — | ✅ Closed | docs updated · `65b6a1e` (PR #1) |
 
-**Round 1 counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total: 19 closed, 2 fixed pending live verification (H1, M4), 1 reopened (C1 → N1)**
+**Round 1 counts:** 3 Critical · 6 High · 7 Medium · 6 Low · **22 total: 20 closed, 2 fixed pending live verification (H1, M4)**
 
 ### Round 2 summary (re-review of `014300e`)
 
 | ID | Severity | Title | Related | Status | Resolved in |
 |---|---|---|---|---|---|
-| N1 | High | Production fail-safe never triggers on real Resource Graph output | C1, BR-003 | ✅ Closed | discovery `subId` join-key fail-safe |
-| N2 | Medium | SDK surface test is skipped in CI | C3 | ✅ Closed | strict `sdk-surface` CI job |
-| N3 | Medium | Telemetry may not be flushed before the invocation ends | H1, OBS-002, OBS-003 | 🔍 Needs verification | `flush_telemetry()` force_flush in `finally` |
-| N4 | Low | Resource group join may be case-sensitive | C2, FR-013 | ✅ Closed | KQL lowercases both RG join keys |
-| N5 | Low | Production tag key matched case-sensitively | BR-003, A-08 | ✅ Closed | case-insensitive `environment` lookup |
-| N6 | Low | Boolean attributes may log as `True`/`False` | H1, OBS-001 | ✅ Closed | `_attrs` emits lowercase bool strings |
-| N7 | Low | `max_parallel_arm_calls` still unused | M1, NFR-005 | ✅ Closed | bounded `ThreadPoolExecutor` prefetch |
+| N1 | High | Production fail-safe never triggers on real Resource Graph output | C1, BR-003 | ✅ Closed | discovery `subId` join-key fail-safe · `1007a59` |
+| N2 | Medium | SDK surface test is skipped in CI | C3 | ✅ Closed | strict `sdk-surface` CI job · `1007a59` |
+| N3 | Medium | Telemetry may not be flushed before the invocation ends | H1, OBS-002, OBS-003 | 🔍 Needs verification | `flush_telemetry()` force_flush in `finally` · `1007a59` |
+| N4 | Low | Resource group join may be case-sensitive | C2, FR-013 | ✅ Closed | KQL lowercases both RG join keys · `1007a59` |
+| N5 | Low | Production tag key matched case-sensitively | BR-003, A-08 | ✅ Closed | case-insensitive `environment` lookup · `1007a59` |
+| N6 | Low | Boolean attributes may log as `True`/`False` | H1, OBS-001 | ✅ Closed | `_attrs` emits lowercase bool strings · `1007a59` |
+| N7 | Low | `max_parallel_arm_calls` still unused | M1, NFR-005 | ✅ Closed | bounded `ThreadPoolExecutor` prefetch · `1007a59` |
 
 **Round 2 counts:** 1 High · 2 Medium · 4 Low · **7 total: 6 closed, 1 fixed pending live verification (N3)**. N1 and N2 are fixed, so T-603 is unblocked at the code level (live verification still required by T-602/T-603).
 
@@ -69,7 +69,7 @@
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Status** | 🔴 Reopened in round 2: main fix verified; fail-safe defective — see [N1](#n1--production-fail-safe-never-triggers-on-real-resource-graph-output) |
+| **Status** | ✅ Closed at code level in round 3 (fail-safe fixed by [N1](#n1--production-fail-safe-never-triggers-on-real-resource-graph-output)); live criterion checked in T-602 (VERIFICATION §3.3) |
 | **Location** | `src/engine/discovery.py` (`build_kql_query`, `_row_to_record`); `src/engine/selection.py` (BR-003 check); `infra/modules/rbac/main.tf` |
 | **Requirements** | BR-003, US-07, A-08 |
 
@@ -620,6 +620,42 @@ Separately, records from the `pwrsched` loggers are also forwarded by the Functi
 
 ---
 
+## Round 3 (re-review of `1007a59`)
+
+Reviewed 2026-10-04 against `1007a59` ("Fix round-2 review findings N1-N7"). Each round-2 fix was re-checked by reproduction, not only by reading the tests.
+
+| ID | Result | How it was checked |
+|---|---|---|
+| N1 | ✅ Confirmed | Row with `subId`, `subscriptionTags` and `mgChain` all `null` → `subscription-tags-unavailable`, not eligible |
+| N2 | ✅ Confirmed | Strict mode without SDKs: 7 failed (no skips). Strict mode with `src/requirements.txt`: 7 passed |
+| N3 | 🔍 Code confirmed | `flush_telemetry()` runs in `finally`, is guarded, and no-ops when unconfigured. Live check: VERIFICATION §3.4, Queries 3 and 6 |
+| N4 | ✅ Confirmed | Generated KQL contains `rgKey = tolower(resourceGroup)` and joins on it |
+| N5 | ✅ Confirmed | Subscription tagged `Environment=Prod` → `production-excluded` |
+| N6 | ✅ Confirmed | `_attrs(dryRun=True)` → `"true"` |
+| N7 | ✅ Confirmed | Fallback `get_state` reads run in a `ThreadPoolExecutor` sized by `max_parallel_arm_calls` |
+
+Two documentation gaps found in round 3 were fixed in the same commit as this update:
+
+- **Status inconsistencies in this document.** The status log returned C1 to Closed, but the C1 summary row, the C1 section, the overall verdict and the round 1 counts still showed it as reopened. The "Resolved in" column for N1–N7 had no commit reference. Both corrected.
+- **Live checks missing from the T-602 checklist.** `VERIFICATION.md` covered only production exclusion and quiet alerts. Added §3.4 (checks for C3, H1, M4, N3, N4 and N6, with KQL) and H2 alert-firing tests in §5.
+
+### Live verification tracker
+
+Close each item in its own section and the status log once the check passes in T-602.
+
+| Finding | Live check | Where | Status |
+|---|---|---|---|
+| C1 | Prod subscription resources logged as `production-excluded` | VERIFICATION §3.3 | 🔍 Pending T-602 |
+| C3 | SQL MI `actualState` never `Unknown` | VERIFICATION §3.4, Query 2 | 🔍 Pending T-602 |
+| H1 | Decision records carry all OBS-001 fields | VERIFICATION §3.4, Query 1 | 🔍 Pending T-602 |
+| H2 | Cycle-health and cycle-exceptions alerts fire | VERIFICATION §5 | 🔍 Pending T-602 |
+| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | VERIFICATION §3.4, Queries 3–5 | 🔍 Pending T-602 |
+| N3 | Summary count matches invocation count | VERIFICATION §3.4, Queries 3 and 6 | 🔍 Pending T-602 |
+| N4 | Mixed-case RG profile inheritance | VERIFICATION §3.4, Query 7 | 🔍 Pending T-602 |
+| N6 | `dryRun` stored as `true` | VERIFICATION §3.4, Query 1 | 🔍 Pending T-602 |
+
+---
+
 ## Status log
 
 | Date | Finding(s) | Change | By |
@@ -659,3 +695,7 @@ Separately, records from the `pwrsched` loggers are also forwarded by the Functi
 | 2026-10-04 | N2 | Fixed: `test_sdk_surface.py` reads `PWRSCHED_SDK_SURFACE_STRICT`; in strict mode a missing SDK fails instead of skips. Added a dedicated `sdk-surface` CI job that installs `src/requirements.txt` and runs the surface test with the strict flag. Verified locally: non-strict → 7 skipped; strict without SDKs → 7 failed (proving the gate bites). | Kiro |
 | 2026-10-04 | C1 | Returned to Closed at the code level: N1 fixed the fail-safe (null-valued `subId` now detected). The live T-602 dry-run criterion still stands. | Kiro |
 | 2026-10-04 | Summary (round 2) | 6 of 7 round-2 findings closed at the code/static level; N3 remains 🔍 pending live T-602. Full suite: **pytest 136 passed / 7 skipped** (the 7 are the SDK-surface checks that only run in the strict `sdk-surface` CI job); **ruff clean**; modified `src/` files `py_compile` clean; `ci.yml` valid YAML. N1 and N2 (the T-603 blockers) are fixed. Terraform unaffected (no infra changes this round). | Kiro |
+| 2026-10-04 | N1–N7 (round 3) | Re-review of `1007a59`: N1, N2, N4, N5, N6 and N7 confirmed fixed by reproduction; N3 confirmed in code, pending live check. pytest 143 passed with pinned SDKs; strict SDK-surface test passes; ruff clean. | Claude |
+| 2026-10-04 | C1 | Summary row, section status, overall verdict and round 1 counts aligned with Kiro's status-log entry (Closed at code level; live T-602 criterion remains). "Resolved in" for N1–N7 now references `1007a59`. | Claude |
+| 2026-10-04 | T-602 checklist | Added VERIFICATION §3.4 (live checks for C3, H1, M4, N3, N4, N6) and H2 alert-firing tests in §5; added the live verification tracker above. | Claude |
+| 2026-10-04 | Housekeeping | Deck moved to `docs/presentations/` (`9187c66`); round-2 housekeeping note resolved. The status slide still shows round-1 counts. | Claude |
