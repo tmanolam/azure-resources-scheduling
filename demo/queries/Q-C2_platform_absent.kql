@@ -1,0 +1,9 @@
+// Q-C2 — Platform resources never appear in decisions (DEMO_TENANT_PLAN §8,
+// scenario S8). W11 lives in rg-demo-platform under the excluded Platform MG;
+// it must never show up in a decision record. Expect an EMPTY result.
+// Point to make: the hub / platform is untouched.
+traces
+| where timestamp > ago(7d)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.resourceId"]) has "rg-demo-platform"
+| project timestamp, resourceId = tostring(customDimensions["pwrsched.resourceId"])

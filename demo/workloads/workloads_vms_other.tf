@@ -6,7 +6,6 @@ resource "azurerm_resource_group" "w9" {
   provider = azurerm.prod
   name     = "rg-demo-prod"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w9" {
@@ -55,11 +54,11 @@ resource "azurerm_linux_virtual_machine" "w9" {
 # demo/landing-zone, DM-12).
 #
 # Plan A: created in the sandbox subscription (requires sandbox_subscription_id).
-# Plan B / sandbox not yet created: skipped here. Under Plan B, run S3 with an
-# RG-level tag in the dev subscription instead (see terraform.tfvars.example).
+# When the sandbox subscription is not yet created, W10 is skipped; run scenario
+# S3 once the subscription exists and is set.
 # =============================================================================
 locals {
-  deploy_w10 = !var.plan_b && var.sandbox_subscription_id != ""
+  deploy_w10 = var.sandbox_subscription_id != ""
 }
 
 resource "azurerm_resource_group" "w10_net" {
@@ -136,15 +135,14 @@ resource "azurerm_linux_virtual_machine" "w10" {
 }
 
 # =============================================================================
-# W11 — Management VM (S8 platform exclusion). MANAGEMENT subscription (Plan A)
-# or dev subscription (Plan B). Tagged Standard, but it sits under the Platform
-# MG (excluded_scope_ids), so the scheduler never touches it.
+# W11 — Management VM (S8 platform exclusion). MANAGEMENT subscription. Tagged
+# Standard on the VM, but it sits under the Platform MG (excluded_scope_ids),
+# so the scheduler never touches it.
 # =============================================================================
 resource "azurerm_resource_group" "w11" {
   provider = azurerm.management
   name     = "rg-demo-platform"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w11" {
@@ -154,7 +152,7 @@ resource "azurerm_network_interface" "w11" {
   location            = var.location
   ip_configuration {
     name                          = "ipconfig1"
-    subnet_id                     = local.separate_management ? azurerm_subnet.mgmt[0].id : azurerm_subnet.dev.id
+    subnet_id                     = azurerm_subnet.mgmt.id
     private_ip_address_allocation = "Dynamic"
   }
 }

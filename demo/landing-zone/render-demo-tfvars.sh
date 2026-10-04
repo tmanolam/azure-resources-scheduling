@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# DM-14 — Render demo/scheduler/demo.tfvars from the landing-zone outputs.
+# DM-14 — Render infra/tenants/demo.tfvars from the landing-zone outputs.
 #
 # Reads `terraform output -json` of demo/landing-zone (run after a successful
 # apply, so the MG/subscription IDs are real) and writes the scope variables
-# into demo/scheduler/demo.tfvars for use with infra/scheduler.
+# into infra/tenants/demo.tfvars for use with ./infra/deploy.sh demo.
 #
 # Usage (from repo root or anywhere):
 #   demo/landing-zone/render-demo-tfvars.sh \
-#     [--alert-email you@example.com] [--out demo/scheduler/demo.tfvars]
+#     [--alert-email you@example.com] [--out infra/tenants/demo.tfvars]
 #
 # Requires: terraform, jq. Run after `terraform -chdir=demo/landing-zone apply`.
 
@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LZ_DIR="$SCRIPT_DIR"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUT="$REPO_ROOT/demo/scheduler/demo.tfvars"
+OUT="$REPO_ROOT/infra/tenants/demo.tfvars"
 ALERT_EMAIL="<your-demo-alert-email>"
 
 while [[ $# -gt 0 ]]; do
@@ -85,5 +85,7 @@ tags = {
 EOF
 
 echo "Wrote $OUT"
-echo "Review it, then deploy with:"
-echo "  terraform -chdir=infra/scheduler apply -var-file=$OUT"
+echo "Review it, then deploy with the per-tenant wrapper (safe backend handling):"
+echo "  ./infra/deploy.sh demo plan"
+echo "  ./infra/deploy.sh demo apply"
+echo "(Ensure infra/tenants/demo.backend.hcl exists — copy demo.backend.hcl.example.)"

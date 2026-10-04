@@ -44,7 +44,7 @@ demo/
 ├── .gitignore                 # ignores evidence/, real *.tfvars, state
 ├── landing-zone/              # MGs, subscription placement + tags, budgets (DM-10–DM-14)
 │   ├── main.tf providers.tf variables.tf budgets.tf outputs.tf
-│   ├── render-demo-tfvars.sh  # generates demo/scheduler/demo.tfvars from outputs
+│   ├── render-demo-tfvars.sh  # generates infra/tenants/demo.tfvars from outputs
 │   └── terraform.tfvars.example
 ├── workloads/                 # W1–W14 with toggles (DM-20–DM-23)
 │   ├── providers.tf variables.tf network.tf
@@ -129,7 +129,7 @@ Generate the scheduler's `demo.tfvars` from the landing-zone outputs:
 
 ```bash
 demo/landing-zone/render-demo-tfvars.sh --alert-email you@example.com
-# writes demo/scheduler/demo.tfvars (gitignored)
+# writes infra/tenants/demo.tfvars (gitignored)
 ```
 
 ---
@@ -142,7 +142,7 @@ Deploys W1–W11 (core) and, optionally, W12–W14. Keep the optional components
 ```bash
 cd demo/workloads
 cp terraform.tfvars.example terraform.tfvars
-# edit: subscription IDs; plan_b = false (Plan A); sandbox id if it exists;
+# edit: subscription IDs; sandbox id if it exists;
 # enable_aks/appgw/sqlmi = false for now
 
 terraform init
@@ -155,33 +155,52 @@ cd ../..
 `RG-Demo-MixedCase` (W2) keeps its exact casing. No secrets appear in outputs.
 
 > If `sub-demo-sandbox` does not exist yet, W10 is skipped automatically and the
-> output says so. Run scenario S3 later once the subscription is added, or use
-> an RG-level tag in dev as the Plan B fallback.
+> output says so. Run scenario S3 later once the subscription is created and its
+> ID is set in `terraform.tfvars`.
+
+> **Outbound access (DR-10):** Azure is phasing out default outbound internet
+> access for new VNets. The demo VMs have no public IP and rely on default
+> outbound, which `az vm run-command` (scenario S11) and in-guest package
+> updates may need. After deploy, verify with:
+> `az vm run-command invoke -g rg-demo-poweroff -n vm-demo-w5 --command-id RunShellScript --scripts "curl -sI https://management.azure.com | head -1"`.
+> If it fails, add a NAT gateway on the dev subnet (small extra cost) — the
+> scheduler itself does not need VM outbound, only the S11 run-command does.
 
 ---
 
 ## 4. Scheduler (dry-run)
 
-Deploy the shipped scheduler into the demo tenant using the generated
-`demo.tfvars`. You need a Terraform **state backend** for `infra/scheduler`
-(README Step 2) and the demo `backend.hcl`.
+Deploy the shipped scheduler into the demo tenant using the per-tenant wrapper,
+which selects the demo var-file and state backend and reinitialises the backend
+safely for this tenant. You need a Terraform **state backend** for the demo
+(README Step 2) and the two demo tenant files.
 
 ```bash
-cd infra/scheduler
-# configure backend.hcl for the demo tenant's state storage (README Step 2/3)
-terraform init -backend-config=backend.hcl
-terraform plan -var-file=../../demo/scheduler/demo.tfvars -out tfplan
-terraform apply tfplan            # dry_run = true in demo.tfvars
+cd infra/tenants
+cp demo.tfvars.example      demo.tfvars        # or generate it (see §2)
+cp demo.backend.hcl.example demo.backend.hcl   # fill the demo state storage account
+cd ../..
+
+# Sign in to the demo tenant first (deploy.sh re-inits the backend, not your CLI session).
+./infra/deploy.sh demo plan
 ```
+
+> `demo.tfvars` can also be generated from the landing-zone outputs:
+> `demo/landing-zone/render-demo-tfvars.sh --alert-email you@example.com`
+> writes `infra/tenants/demo.tfvars` directly.
 
 **Checkpoint — plan review (R-01 safety):** the plan creates the custom-role
 assignment **only** at `demo-landingzones` and `demo-sandbox` — never at the
-Tenant Root, `demo` root, or `demo-platform`.
+Tenant Root, `demo` root, or `demo-platform`. Then apply:
+
+```bash
+./infra/deploy.sh demo apply
+```
 
 Publish the function code:
 
 ```bash
-cd ../../src
+cd src
 FUNC_APP=$(terraform -chdir=../infra/scheduler output -raw function_app_name)
 func azure functionapp publish "$FUNC_APP" --python
 cd ..
@@ -238,9 +257,9 @@ terraform -chdir=demo/workloads apply
 Flip the scheduler to live:
 
 ```bash
-# in demo/scheduler/demo.tfvars: dry_run = false
-terraform -chdir=infra/scheduler plan -var-file=../demo/scheduler/demo.tfvars -out tfplan
-terraform -chdir=infra/scheduler apply tfplan   # only change: pwrsched:dryRun → false
+# in infra/tenants/demo.tfvars: dry_run = false
+./infra/deploy.sh demo plan     # only change: pwrsched:dryRun → false
+./infra/deploy.sh demo apply
 ```
 
 Run the live scenarios with the scripts (see the [map](#scenario--script--query-map)):
@@ -298,7 +317,8 @@ live. Open Application Insights → Logs and run the saved queries in order:
 |---|---|---|
 | Q-A | `queries/Q-A_day_timeline.kql` | The day runs itself, in dependency order |
 | Q-B | `queries/Q-B_cycle_detail.kql` | Every decision explained and auditable |
-| Q-C | `queries/Q-C_exclusions.kql` | Production and platform untouched |
+| Q-C1 | `queries/Q-C1_production_excluded.kql` | Production skipped every cycle |
+| Q-C2 | `queries/Q-C2_platform_absent.kql` | Platform resources never acted on (empty) |
 | Q-D | `queries/Q-D_overrides.kql` | Owners extend hours without a ticket |
 | Q-E | `queries/Q-E_self_healing.kql` | Drift corrected automatically |
 | Q-F | `queries/Q-F_cycle_health.kql` | Steady, observable, safe to operate |
@@ -316,19 +336,25 @@ Follow DEMO_TENANT_PLAN §9. The script does the three Terraform destroys and
 reminds you of the manual steps:
 
 ```bash
-# 1. Stop actions first: set dry_run = true in demo/scheduler/demo.tfvars and apply
-terraform -chdir=infra/scheduler apply -var-file=../demo/scheduler/demo.tfvars
+# 1. Stop actions first: set dry_run = true in infra/tenants/demo.tfvars and apply
+./infra/deploy.sh demo plan && ./infra/deploy.sh demo apply
 
 # 2. Export evidence if you want to keep it
 demo/scripts/collect-evidence.sh final
 
 # 3. Destroy workloads → scheduler → landing zone (asks for confirmation)
-demo/scripts/teardown.sh --demo-tfvars demo/scheduler/demo.tfvars
+demo/scripts/teardown.sh
 ```
 
-Then the **manual** steps the script reminds you about: delete the demo-only
-state storage account, turn **off** elevated access (DM-04), and cancel the
-subscriptions when the tenant is no longer needed.
+Then the **manual** steps the script reminds you about:
+- Remove the subscription tags left by the landing zone (DR-11): `terraform
+  destroy` does not clear `environment` / `schedule-profile` set via
+  `azapi_update_resource`. Delete them with
+  `az tag update --operation Delete --resource-id /subscriptions/<id> --tags environment schedule-profile`
+  on each demo subscription.
+- Delete the demo-only state storage account.
+- Turn **off** elevated access (DM-04).
+- Cancel the subscriptions when the tenant is no longer needed.
 
 ---
 
@@ -343,8 +369,8 @@ subscriptions when the tenant is no longer needed.
 | S5 override: stop early | `scenario-override.sh set --state stopped` | Q-D | — |
 | S5b override: ad-hoc start | `scenario-override.sh set --state running` | Q-B | — |
 | S6 opt-out | (W4 pre-tagged `schedule-enabled=false`) | Q-B | — |
-| S7 production exclusion | (W9 in prod subscription) | Q-C | C1, N5 |
-| S8 platform exclusion | (W11 under Platform MG) | Q-C | — |
+| S7 production exclusion | (W9 in prod subscription) | Q-C1 | C1, N5 |
+| S8 platform exclusion | (W11 under Platform MG) | Q-C2 | — |
 | S9 nested MG exclusion | `scenario-move-sandbox-mg.sh exclude/restore` | Q-B | — |
 | S10 drift correction | `scenario-start-db.sh` | Q-E | — |
 | S11 powered-off VM | `scenario-poweroff-vm.sh` | Q-E | H4 |

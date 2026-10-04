@@ -27,7 +27,6 @@ resource "azurerm_resource_group" "w1" {
   provider = azurerm.dev
   name     = "rg-demo-vm"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w1" {
@@ -125,7 +124,6 @@ resource "azurerm_resource_group" "w3" {
   provider = azurerm.dev
   name     = "rg-demo-override"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w3" {
@@ -171,7 +169,6 @@ resource "azurerm_resource_group" "w4" {
   provider = azurerm.dev
   name     = "rg-demo-optout"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w4" {
@@ -221,7 +218,6 @@ resource "azurerm_resource_group" "w5" {
   provider = azurerm.dev
   name     = "rg-demo-poweroff"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_interface" "w5" {

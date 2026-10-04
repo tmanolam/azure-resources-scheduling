@@ -5,7 +5,6 @@ resource "azurerm_resource_group" "w6" {
   provider = azurerm.dev
   name     = "rg-demo-vmss"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_linux_virtual_machine_scale_set" "w6" {
@@ -53,7 +52,6 @@ resource "azurerm_resource_group" "w7w8" {
   provider = azurerm.dev
   name     = "rg-demo-db"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_postgresql_flexible_server" "w7" {
@@ -100,6 +98,16 @@ resource "azurerm_mysql_flexible_server" "w8" {
   sku_name               = "B_Standard_B1ms"
   version                = "8.0.21"
   zone                   = "1"
+
+  # DR-07: unlike PostgreSQL flexible server, azurerm's
+  # azurerm_mysql_flexible_server treats public_network_access_enabled as a
+  # COMPUTED attribute — it cannot be set to false directly on the public-access
+  # connectivity method (hashicorp/terraform-provider-azurerm#26156). Fully
+  # disabling public access requires private link (a delegated subnet + private
+  # DNS zone), which is disproportionate for a cost-controlled demo DB. With no
+  # firewall rules created here, the server denies all inbound by default, so it
+  # is not reachable; the public endpoint simply exists. Documented as an
+  # accepted deviation from DM-23 for MySQL only.
 
   tags = {
     "schedule-profile" = var.standard_profile

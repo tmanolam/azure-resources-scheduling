@@ -3,7 +3,7 @@
 
 variable "workload_dev_subscription_id" {
   type        = string
-  description = "sub-demo-workload-dev — hosts non-production workloads (and all non-prod under Plan B)."
+  description = "sub-demo-workload-dev — hosts the non-production workloads (W1–W8, W12–W14)."
 }
 
 variable "workload_prod_subscription_id" {
@@ -13,7 +13,7 @@ variable "workload_prod_subscription_id" {
 
 variable "management_subscription_id" {
   type        = string
-  description = "sub-demo-management — hosts only W11 (platform-MG exclusion proof). Ignored under Plan B."
+  description = "sub-demo-management — hosts only W11 (platform-MG exclusion proof)."
 }
 
 variable "sandbox_subscription_id" {
@@ -22,18 +22,7 @@ variable "sandbox_subscription_id" {
   description = <<-EOT
     sub-demo-sandbox — hosts W10 (subscription-level tag inheritance, S3). May be
     empty until the subscription is created (Azure quota); when empty, W10 and the
-    sandbox network are skipped. Under Plan B, W10 falls back to the dev
-    subscription with an RG-level profile tag instead (DM-22).
-  EOT
-}
-
-variable "plan_b" {
-  type        = bool
-  default     = false
-  description = <<-EOT
-    DM-22. false = Plan A (dev/prod/management subscriptions). true = Plan B:
-    all non-prod workloads (incl. W11) go into the dev subscription using
-    resource groups; only W9 stays in the prod subscription.
+    sandbox network are skipped. Set it and re-apply once the subscription exists.
   EOT
 }
 

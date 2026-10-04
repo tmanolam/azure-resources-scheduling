@@ -9,6 +9,9 @@
 traces
 | where timestamp > ago(30d)
 | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+// DR-04: only count LIVE cycles. The 24x7 dry-run week would otherwise be
+// reported as saved hours. dryRun is stored as the lowercase string "true"/"false".
+| where tostring(customDimensions["pwrsched.dryRun"]) == "false"
 | where tostring(customDimensions["pwrsched.desiredState"]) == "Stopped"
 | extend resourceId = tostring(customDimensions["pwrsched.resourceId"])
 | summarize stoppedCycles = count() by resourceId

@@ -1,18 +1,14 @@
 # demo/workloads/terraform.tfvars — fill once the subscriptions exist (DM-03).
-# Copy to terraform.tfvars (gitignored). Plan A (default): dev/prod/management.
+# Copy to terraform.tfvars (gitignored). All four subscriptions use the credit.
 
 workload_dev_subscription_id  = "<sub-demo-workload-dev-id>"
 workload_prod_subscription_id = "<sub-demo-workload-prod-id>"
 management_subscription_id    = "<sub-demo-management-id>"
 
 # Leave empty until sub-demo-sandbox is created (Azure quota). When empty, W10
-# (the sandbox subscription-inheritance VM) is skipped; run scenario S3 with an
-# RG-level tag in dev instead, or set this and re-apply once the sub exists.
+# (the sandbox subscription-inheritance VM) is skipped; set this and re-apply
+# once the subscription exists.
 sandbox_subscription_id = ""
-
-# Plan A is the default. Set true only if the credit allows a single subscription
-# (DM-02 / §2.1): all non-prod workloads collapse into the dev subscription.
-plan_b = false
 
 location       = "southeastasia"
 vm_size        = "Standard_B1s"

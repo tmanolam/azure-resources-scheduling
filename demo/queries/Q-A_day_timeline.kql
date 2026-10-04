@@ -9,6 +9,9 @@ let dayStart = datetime(2026-10-06 00:00:00);   // <-- set to a live weekday (UT
 traces
 | where timestamp >= dayStart and timestamp < dayStart + 1d
 | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+// DR-04: replay a LIVE day only (dryRun stored as lowercase "false"); drop this
+// filter if you deliberately want to show a dry-run day.
+| where tostring(customDimensions["pwrsched.dryRun"]) == "false"
 | where tostring(customDimensions["pwrsched.action"]) in ("start", "stop")
 | extend
     action = tostring(customDimensions["pwrsched.action"]),

@@ -10,7 +10,6 @@ resource "azurerm_resource_group" "w12" {
   provider = azurerm.dev
   name     = "rg-demo-aks"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_kubernetes_cluster" "w12" {
@@ -46,7 +45,6 @@ resource "azurerm_resource_group" "w13" {
   provider = azurerm.dev
   name     = "rg-demo-appgw"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 # App Gateway needs its own dedicated subnet. Carve one from the dev VNet.
@@ -59,10 +57,65 @@ resource "azurerm_subnet" "appgw" {
   address_prefixes     = ["10.10.3.0/24"]
 }
 
-# App Gateway v2 requires a public IP for its frontend. This carries no inbound
-# NSG allow rules on a workload (the gateway itself needs the PIP to exist);
-# the gateway has no backends, it exists only to be started/stopped (DM-23: the
-# VMs have no public inbound; the App Gateway PIP is a gateway requirement).
+# DR-05: NSG on the App Gateway subnet. Application Gateway v2 REQUIRES inbound
+# from GatewayManager (65200-65535) and allows AzureLoadBalancer; everything
+# else from the Internet is denied so the gateway does not expose a public
+# listener to the world (DM-23 — no public inbound to demo workloads). The
+# gateway has no backends; it exists only to be started/stopped.
+resource "azurerm_network_security_group" "appgw" {
+  count               = var.enable_appgw ? 1 : 0
+  provider            = azurerm.dev
+  name                = "nsg-demo-appgw"
+  resource_group_name = azurerm_resource_group.w13[0].name
+  location            = var.location
+
+  security_rule {
+    name                       = "AllowGatewayManager"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "65200-65535"
+    source_address_prefix      = "GatewayManager"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowAzureLoadBalancer"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "AzureLoadBalancer"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyInternetInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "Internet"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "appgw" {
+  count                     = var.enable_appgw ? 1 : 0
+  provider                  = azurerm.dev
+  subnet_id                 = azurerm_subnet.appgw[0].id
+  network_security_group_id = azurerm_network_security_group.appgw[0].id
+}
+
+# App Gateway v2 requires a public IP for its frontend. With the NSG above, the
+# listener is not reachable from the Internet; the PIP exists only because the
+# gateway resource requires one.
 resource "azurerm_public_ip" "appgw" {
   count               = var.enable_appgw ? 1 : 0
   provider            = azurerm.dev
@@ -139,7 +192,6 @@ resource "azurerm_resource_group" "w14" {
   provider = azurerm.dev
   name     = "rg-demo-sqlmi"
   location = var.location
-  tags     = { "schedule-profile" = var.standard_profile }
 }
 
 resource "azurerm_network_security_group" "sqlmi" {
@@ -182,7 +234,7 @@ resource "azurerm_mssql_managed_instance" "w14" {
   administrator_login          = "demomi"
   administrator_login_password = random_password.postgres.result # reuse the generated secret; never output
 
-  license_type       = "BasePrice"
+  license_type       = "LicenseIncluded" # DR-02: no Azure Hybrid Benefit in a fresh demo tenant
   sku_name           = "GP_Gen5"
   vcores             = 4
   storage_size_in_gb = 32

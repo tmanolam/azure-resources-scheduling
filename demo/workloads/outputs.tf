@@ -28,11 +28,6 @@ output "ssh_public_key" {
   value       = tls_private_key.vm.public_key_openssh
 }
 
-output "plan" {
-  description = "Which deployment plan is active."
-  value       = var.plan_b ? "Plan B (single non-prod subscription)" : "Plan A (dev/prod/management subscriptions)"
-}
-
 output "optional_components" {
   description = "State of the W12–W14 toggles."
   value = {

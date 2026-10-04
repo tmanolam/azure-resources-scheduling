@@ -35,15 +35,6 @@ variable "mg_prefix" {
   description = "Prefix / name of the intermediate root management group (role_assignable_scope)."
 }
 
-variable "budget_subscription_ids" {
-  type        = string
-  default     = ""
-  description = <<-EOT
-    Deprecated placeholder; budgets are created on all provided workload/management
-    subscriptions by budgets.tf. Kept to avoid breaking older tfvars. Unused.
-  EOT
-}
-
 variable "budget_contact_emails" {
   type        = list(string)
   default     = []

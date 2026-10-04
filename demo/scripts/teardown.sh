@@ -7,17 +7,20 @@
 #   1. Set dry_run = true on the scheduler (stops all actions within a cycle).
 #   2. terraform destroy demo/workloads (optional components first: SQL MI, AppGw, AKS).
 #   3. (Export evidence first if wanted: collect-evidence.sh final)
-#   4. terraform destroy infra/scheduler with demo.tfvars.
+#   4. Destroy the scheduler via ./infra/deploy.sh demo destroy (DR-01: this
+#      re-initialises the demo backend first, so the destroy targets the demo
+#      state — never whatever infra/scheduler was last pointed at).
 #   5. terraform destroy demo/landing-zone (subscriptions return to Tenant Root).
-#   6. Delete the demo-only Terraform state storage account (if any) — manual.
-#   7. Turn off elevated access (DM-04) — manual.
-#   8. Cancel subscriptions when the tenant is no longer needed — manual.
+#   6. Remove subscription tags left by azapi_update_resource (DR-11) — manual.
+#   7. Delete the demo-only Terraform state storage account (if any) — manual.
+#   8. Turn off elevated access (DM-04) — manual.
+#   9. Cancel subscriptions when the tenant is no longer needed — manual.
 #
-# This script performs steps 2, 4 and 5 (the Terraform destroys) and reminds you
-# about the manual steps. Step 1 is done via the scheduler tfvars + apply.
+# This script performs steps 2, 4 and 5 and reminds you about the manual steps.
+# Step 1 is done via infra/tenants/demo.tfvars + ./infra/deploy.sh demo apply.
 #
 # Usage:
-#   teardown.sh [--demo-tfvars demo/scheduler/demo.tfvars] [--yes]
+#   teardown.sh [--yes]
 #
 # --yes skips the interactive confirmation (use with care).
 
@@ -27,14 +30,13 @@ command -v terraform >/dev/null || die "terraform is required."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DEMO_TFVARS="$REPO_ROOT/demo/scheduler/demo.tfvars"
+DEMO_BACKEND="$REPO_ROOT/infra/tenants/demo.backend.hcl"
 ASSUME_YES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --demo-tfvars) DEMO_TFVARS="$2"; shift 2 ;;
-    --yes)         ASSUME_YES=true; shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    --yes)     ASSUME_YES=true; shift ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) die "Unknown argument: $1" ;;
   esac
 done
@@ -48,10 +50,11 @@ confirm() {
 
 _bold "Demo teardown (DEMO_TENANT_PLAN §9)"
 log "This DESTROYS the demo workloads, scheduler and landing zone. It is irreversible."
+log "Repo root: $REPO_ROOT"
 echo
 
-_bold "Reminder — step 1: set dry_run = true in $DEMO_TFVARS and apply BEFORE teardown,"
-log  "so the scheduler stops acting within a cycle. (Not done automatically here.)"
+_bold "Reminder — step 1: set dry_run = true in infra/tenants/demo.tfvars and run"
+log  "  ./infra/deploy.sh demo apply   BEFORE teardown, so the scheduler stops acting."
 _bold "Reminder — step 3: export evidence first if you want to keep it:"
 log  "  demo/scripts/collect-evidence.sh final"
 echo
@@ -64,16 +67,19 @@ terraform -chdir="$REPO_ROOT/demo/workloads" destroy -auto-approve
 changed "demo/workloads destroyed"
 echo
 
-# --- Step 4: destroy the scheduler ------------------------------------------
-_bold "Step 4 — destroy infra/scheduler (with demo.tfvars)"
-confirm "Destroy the scheduler (Function App, App Config, custom role + assignments)?"
-if [[ -f "$DEMO_TFVARS" ]]; then
-  terraform -chdir="$REPO_ROOT/infra/scheduler" destroy -var-file="$DEMO_TFVARS" -auto-approve
+# --- Step 4: destroy the scheduler via the per-tenant wrapper (DR-01) -------
+_bold "Step 4 — destroy the scheduler (./infra/deploy.sh demo destroy)"
+if [[ -f "$DEMO_BACKEND" ]]; then
+  log "Backend to be used (demo state):"
+  grep -E '^(storage_account_name|container_name|key)' "$DEMO_BACKEND" | sed 's/^/    /'
 else
-  log "WARN: $DEMO_TFVARS not found; running destroy without -var-file (may prompt)."
-  terraform -chdir="$REPO_ROOT/infra/scheduler" destroy -auto-approve
+  die "missing $DEMO_BACKEND — copy infra/tenants/demo.backend.hcl.example and fill it."
 fi
-changed "infra/scheduler destroyed"
+confirm "Destroy the scheduler (Function App, App Config, custom role + assignments) in the DEMO state above?"
+# deploy.sh demo destroy runs 'init -reconfigure -backend-config=demo.backend.hcl'
+# first, so the destroy is bound to the demo state, not a stale backend.
+"$REPO_ROOT/infra/deploy.sh" demo destroy
+changed "scheduler destroyed (demo state)"
 echo
 
 # --- Step 5: destroy the landing zone ---------------------------------------
@@ -84,6 +90,9 @@ changed "demo/landing-zone destroyed"
 echo
 
 _bold "Terraform destroys complete. Remaining MANUAL steps (§9):"
-log "6. Delete the demo-only Terraform state storage account, if you created one."
-log "7. Turn OFF elevated access (DM-04): Entra ID → Properties → Access management = No."
-log "8. Cancel the subscriptions when the tenant is no longer needed (a Plan B PAYG sub keeps billing)."
+log "6. (DR-11) Remove subscription tags left by azapi (terraform destroy does NOT clear them):"
+log "     az tag update --operation Delete --resource-id /subscriptions/<id> \\"
+log "       --tags environment schedule-profile   # on each demo subscription"
+log "7. Delete the demo-only Terraform state storage account, if you created one."
+log "8. Turn OFF elevated access (DM-04): Entra ID → Properties → Access management = No."
+log "9. Cancel the subscriptions when the tenant is no longer needed."

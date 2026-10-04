@@ -1,0 +1,10 @@
+// Q-C1 — Production exclusions per day (DEMO_TENANT_PLAN §8, scenario S7).
+// W9's subscription is tagged Environment=Prod, so every cycle logs it as
+// production-excluded. Point to make: production is skipped every cycle, never
+// acted on (BR-003, US-07).
+traces
+| where timestamp > ago(7d)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.result"]) == "production-excluded"
+| summarize productionExcluded = count() by bin(timestamp, 1d)
+| order by timestamp asc

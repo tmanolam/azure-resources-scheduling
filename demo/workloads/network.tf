@@ -28,15 +28,9 @@ resource "random_password" "mysql" {
 
 # -----------------------------------------------------------------------------
 # Networking. One VNet + subnet per subscription that hosts VMs. No public IPs,
-# no inbound allow rules. Under Plan B the management network collapses into dev
-# (its resources route to the dev provider), so only dev + prod networks exist.
+# no inbound allow rules. The management network (W11) and prod network (W9) are
+# always created; all four subscriptions draw on the credit (plan v0.3).
 # -----------------------------------------------------------------------------
-
-locals {
-  # Whether a dedicated management network/resources are created separately.
-  # Under Plan B, W11 lives in the dev subscription, so no separate mgmt network.
-  separate_management = !var.plan_b
-}
 
 # --- Dev network -------------------------------------------------------------
 resource "azurerm_resource_group" "net_dev" {
@@ -116,28 +110,25 @@ resource "azurerm_subnet" "prod" {
   address_prefixes     = ["10.20.1.0/24"]
 }
 
-# --- Management network (W11 only; Plan A only) ------------------------------
+# --- Management network (W11 only) ------------------------------------------
 resource "azurerm_resource_group" "net_mgmt" {
-  count    = local.separate_management ? 1 : 0
   provider = azurerm.management
   name     = "rg-demo-network-mgmt"
   location = var.location
 }
 
 resource "azurerm_virtual_network" "mgmt" {
-  count               = local.separate_management ? 1 : 0
   provider            = azurerm.management
   name                = "vnet-demo-mgmt"
-  resource_group_name = azurerm_resource_group.net_mgmt[0].name
+  resource_group_name = azurerm_resource_group.net_mgmt.name
   location            = var.location
   address_space       = ["10.30.0.0/16"]
 }
 
 resource "azurerm_subnet" "mgmt" {
-  count                = local.separate_management ? 1 : 0
   provider             = azurerm.management
   name                 = "snet-workloads"
-  resource_group_name  = azurerm_resource_group.net_mgmt[0].name
-  virtual_network_name = azurerm_virtual_network.mgmt[0].name
+  resource_group_name  = azurerm_resource_group.net_mgmt.name
+  virtual_network_name = azurerm_virtual_network.mgmt.name
   address_prefixes     = ["10.30.1.0/24"]
 }
