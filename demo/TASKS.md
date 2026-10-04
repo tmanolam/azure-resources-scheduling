@@ -218,6 +218,38 @@ Scenarios run against the live tenant (🔵); listed so the scripts/queries abov
 | S15 | Alerts | A | H2 |
 | S16 | Past-due recovery | A | M4 |
 | S17 | SQL MI (if W14) | B | C3 |
+| S18 | AKS node pool protection | A | V1 |
+
+---
+
+## 7. Review findings — demo scaffold (2026-10-04)
+
+Code review of `b963585` (demo scaffold). IDs use the prefix **DR-** (demo
+review) because these are defects in the demo code, not live verification
+issues (`V` prefix, VERIFICATION §6.1). Fix them before DM-31 (first scheduler
+deploy) unless noted. The V1 product fix (`eb0cdd3`) was reviewed separately
+and is correct; its live check is S18.
+
+**Status legend:** 🔴 Open · 🟡 In progress · ✅ Fixed · 🔍 Verify live · ⚪ Won't fix (reason)
+
+| ID | Severity | Finding | Recommended fix | Status |
+|---|---|---|---|---|
+| DR-01 | High | **Wrong `-var-file` paths and unsafe scheduler teardown.** With `terraform -chdir=infra/scheduler`, a relative `-var-file` resolves against `infra/scheduler`, so `../demo/scheduler/demo.tfvars` points to `infra/demo/…` (README Phase B step ~line 242 and teardown step ~line 320). `teardown.sh` passes a relative path through unchanged, so its own `-f` check passes but Terraform fails. Teardown also destroys `infra/scheduler` against whatever backend that folder was last initialised with. | Resolve paths to absolute in all scripts. Deploy and destroy the demo scheduler through `infra/deploy.sh demo <cmd>` with `infra/tenants/demo.tfvars` + `demo.backend.hcl` (DM-30), or run `terraform init -reconfigure -backend-config=<demo backend>` and print the backend before any destroy. Update README Phase B and teardown commands. | 🔴 Open |
+| DR-02 | High | **SQL MI uses `license_type = "BasePrice"`** (Azure Hybrid Benefit), which asserts existing SQL Server licences with Software Assurance. Likely non-compliant in a fresh demo tenant; the plan's budget assumes licence-included pricing. | Set `license_type = "LicenseIncluded"` in `workloads_optional.tf`. | 🔴 Open |
+| DR-03 | Medium | **Plan B still implemented** although removed in plan v0.3: `plan_b` variable, provider alias switching, `separate_management` local, `deploy_w10` condition, `plan` output, `terraform.tfvars.example`, README (~lines 145, 159), `teardown.sh` message, DM-22 section and DM-02 note in this file. Under Plan B, W11 (platform VM) would land in an in-scope subscription. | Remove all Plan B code and text; mark DM-22 as removed (plan v0.3). Keep the sandbox-not-yet-created handling (`sandbox_subscription_id == ""`). | 🔴 Open |
+| DR-04 | Medium | **Q-G (hours saved) counts dry-run cycles**, so the 24×7 dry-run week is reported as saved hours. Q-A has the same issue when replaying a live day. | Add `| where tostring(customDimensions["pwrsched.dryRun"]) == "false"` to Q-G and Q-A (note the filter in the query comments). | 🔴 Open |
+| DR-05 | Medium | **App Gateway exposes a public port-80 listener** (empty backend, answers 502 from the internet), contradicting DM-23 "no public inbound access". | Add an NSG on `snet-appgw` allowing only `GatewayManager` 65200–65535 and `AzureLoadBalancer` inbound (optionally your own IP on 80) and denying other Internet inbound; or document it as an accepted exception in README and DM-23. | 🔴 Open |
+| DR-06 | Low | **Most workload RGs also carry `schedule-profile`** (W1, W3–W9, W11–W14), not only W2's. Harmless, but RG-level inheritance is then not isolated to S2. | Tag only `RG-Demo-MixedCase` (W2) at RG level; keep own tags on resources, per plan §4.1. (Keep RG-level override tags for S4/S5 as scenario actions, not static tags.) | 🔴 Open |
+| DR-07 | Low | **MySQL Flexible doesn't explicitly disable public network access** (PostgreSQL does). The firewall denies by default, but it's inconsistent with DM-23. | Set `public_network_access = "Disabled"` on `azurerm_mysql_flexible_server.w8` (check the attribute name for the pinned azurerm 4.x version). | 🔴 Open |
+| DR-08 | Low | **`budget_subscription_ids`** in `demo/landing-zone/variables.tf` is described as "deprecated, unused" in brand-new code. | Remove the variable (and any tfvars example reference). | 🔴 Open |
+| DR-09 | Low | **Q-C ends Part 1 with `;`** followed by a commented-out Part 2. A trailing statement separator may not parse in Log Analytics. | Run it once in Log Analytics; if it fails, split into `Q-C1_production_excluded.kql` and `Q-C2_platform_absent.kql`. | 🔍 Verify |
+| DR-10 | Low | **Outbound access from demo VMs** may be unavailable: Azure is phasing out default outbound internet access for new VNets. `az vm run-command` (S11) or package updates could fail. | Verify with `az vm run-command invoke` on W5 after deploy; if it fails, add a NAT gateway on the dev subnet (and note the small extra cost). | 🔍 Verify |
+| DR-11 | Low | **Subscription tags are not removed on destroy:** `azapi_update_resource` leaves `environment` / `schedule-profile` on the subscriptions after `terraform destroy`. | Add a manual teardown step (README §Teardown and `teardown.sh` reminder) to remove the subscription tags, or switch to a resource that cleans up. | 🔴 Open |
+
+**Also pending (not a defect):** `sub-demo-sandbox` is not created yet (Azure
+quota). W10 and scenarios S3 and S9 stay blocked until it exists; re-run
+`register-providers.sh` and re-apply `demo/landing-zone` and `demo/workloads`
+with `sandbox_subscription_id` set.
 
 ---
 
@@ -233,3 +265,4 @@ Scenarios run against the live tenant (🔵); listed so the scripts/queries abov
 | 2026-10-04 | DM-41 | `demo/queries/` authored | Q-A…Q-G (§8) + `verification-3.4-queries.kql` (§3.4 Q1–7). All KQL uses `customDimensions["pwrsched.*"]` matching `telemetry.py` and `monitoring/main.tf`. |
 | 2026-10-04 | DM-40, DM-42, DM-43 | `demo/scripts/` authored | 8 scenario scripts + `lib/common.sh`, `collect-evidence.sh`, `teardown.sh`; `demo/.gitignore` (evidence/, tfvars, state). All 11 scripts `bash -n` clean; evidence awk splitter verified (7 statements); §8 comment-strip keeps `let`/inline comments runnable. Effects/runs 🔵. |
 | 2026-10-04 | README | `demo/README.md` runbook authored | End-to-end order of operations (prereqs → landing-zone → workloads → scheduler dry-run → Phase A verify → go-live → Phase B scenarios → evidence/demo → teardown), per-step commands cross-checked against built files + `infra/scheduler` outputs (App Config name derived from endpoint since not a scheduler output — no product change), and a scenario→script→query map. Only DM-31 (deploy) and DM-44 (optional workbook) remain. |
+| 2026-10-04 | DR-01–DR-11 | Review of demo scaffold `b963585` recorded (§7) | 2 High (wrong var-file paths / unsafe scheduler teardown; SQL MI Azure Hybrid Benefit licence), 3 Medium (Plan B leftovers, Q-G/Q-A count dry-run cycles, public App Gateway listener), 6 Low. V1 product fix `eb0cdd3` reviewed: correct; 156 tests pass, ruff clean; live check remains S18. Terraform not validated in the review environment (no binary). |
