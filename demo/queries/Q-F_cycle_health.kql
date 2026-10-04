@@ -1,0 +1,22 @@
+// Q-F — Cycle health (DEMO_TENANT_PLAN §8).
+// Per-hour cycle summaries (evaluated/started/stopped/skipped/failed) over the
+// demo period. Point to make: steady 15-minute cycles; the system is observable
+// and safe to operate (OBS-002). Pair with the alert history from S14/S15.
+traces
+| where timestamp > ago(24h)
+| where customDimensions["pwrsched.event"] == "pwrsched.summary"
+| extend
+    evaluated = toint(customDimensions["pwrsched.evaluated"]),
+    started   = toint(customDimensions["pwrsched.started"]),
+    stopped   = toint(customDimensions["pwrsched.stopped"]),
+    skipped   = toint(customDimensions["pwrsched.skipped"]),
+    failed    = toint(customDimensions["pwrsched.failed"])
+| summarize
+    cycles        = count(),
+    sumEvaluated  = sum(evaluated),
+    sumStarted    = sum(started),
+    sumStopped    = sum(stopped),
+    sumSkipped    = sum(skipped),
+    sumFailed     = sum(failed)
+    by bin(timestamp, 1h)
+| order by timestamp asc

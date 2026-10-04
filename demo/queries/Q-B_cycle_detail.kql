@@ -1,0 +1,26 @@
+// Q-B — Decision detail for one cycle (DEMO_TENANT_PLAN §8).
+// Every resource evaluated in a single run: resource, profile, desired vs
+// actual, action, result. Point to make: every decision is explained and
+// auditable (OBS-001).
+//
+// Picks the most recent runId; replace with a specific runId to pin a cycle.
+let latestRun = toscalar(
+    traces
+    | where timestamp > ago(1h)
+    | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+    | top 1 by timestamp desc
+    | project tostring(customDimensions["pwrsched.runId"])
+);
+traces
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.runId"]) == latestRun
+| project
+    timestamp,
+    resourceId   = tostring(customDimensions["pwrsched.resourceId"]),
+    type         = tostring(customDimensions["pwrsched.type"]),
+    profile      = tostring(customDimensions["pwrsched.profile"]),
+    desiredState = tostring(customDimensions["pwrsched.desiredState"]),
+    actualState  = tostring(customDimensions["pwrsched.actualState"]),
+    action       = tostring(customDimensions["pwrsched.action"]),
+    result       = tostring(customDimensions["pwrsched.result"])
+| order by type asc, resourceId asc

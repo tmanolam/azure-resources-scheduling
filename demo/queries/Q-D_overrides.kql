@@ -1,0 +1,22 @@
+// Q-D — Overrides in action (DEMO_TENANT_PLAN §8, scenario S4).
+// W3 (rg-demo-override) decisions on the S4 evening: desiredState=Running after
+// 17:30 (kept running by the override), then stopped after the override expires
+// (e.g. 19:00). Point to make: owners extend hours without a ticket.
+//
+// Overrides are not a separate telemetry field; they are identified by the
+// desiredState being Running OUTSIDE the profile window (or Stopped inside it)
+// for the tagged resource (§8 note).
+//
+// Set to the evening you ran S4 (UTC). 17:30 Bangkok = 10:30 UTC.
+let windowStart = datetime(2026-10-06 09:00:00);   // <-- S4 evening (UTC)
+traces
+| where timestamp between (windowStart .. (windowStart + 6h))
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.resourceId"]) has "rg-demo-override"
+| project
+    timestamp,
+    desiredState = tostring(customDimensions["pwrsched.desiredState"]),
+    actualState  = tostring(customDimensions["pwrsched.actualState"]),
+    action       = tostring(customDimensions["pwrsched.action"]),
+    result       = tostring(customDimensions["pwrsched.result"])
+| order by timestamp asc

@@ -1,0 +1,16 @@
+// Q-G — Hours saved (DEMO_TENANT_PLAN §8).
+// Per resource, the number of cycles where the desired state was Stopped,
+// multiplied by the 15-minute cycle length, over the demo period. Point to
+// make: the business case, from real data.
+//
+// Note (§8): this estimates AVOIDED RUNNING HOURS, not a cost figure. Multiply
+// by the VM size's hourly rate in the presentation for a currency figure. Each
+// cycle = 15 min = 0.25 h; one decision record per resource per cycle.
+traces
+| where timestamp > ago(30d)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.desiredState"]) == "Stopped"
+| extend resourceId = tostring(customDimensions["pwrsched.resourceId"])
+| summarize stoppedCycles = count() by resourceId
+| extend estimatedHoursAvoided = stoppedCycles * 0.25
+| order by estimatedHoursAvoided desc

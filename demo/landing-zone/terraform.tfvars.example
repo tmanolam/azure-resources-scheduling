@@ -1,0 +1,14 @@
+# demo/landing-zone/terraform.tfvars — fill in once the subscriptions exist
+# (DM-03). Copy to terraform.tfvars (gitignored). Plan A: all four subscriptions.
+
+management_subscription_id    = "<sub-demo-management-id>"
+workload_dev_subscription_id  = "<sub-demo-workload-dev-id>"
+workload_prod_subscription_id = "<sub-demo-workload-prod-id>"
+
+# Leave empty until sub-demo-sandbox is created (Azure quota); set and re-apply.
+sandbox_subscription_id = ""
+
+mg_prefix = "demo"
+
+# Budget threshold alert recipients (USD 250 / 500 / 750 — DM-13).
+budget_contact_emails = ["<your-demo-alert-email>"]

@@ -1,0 +1,13 @@
+# Demo evidence output (DM-42) — generated, not committed.
+evidence/
+
+# Real tfvars (keep only the .example templates). The repo-root .gitignore also
+# ignores *.tfvars globally; this is explicit for the demo folder.
+*.tfvars
+!*.tfvars.example
+
+# Terraform working dirs / state (demo uses local state).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

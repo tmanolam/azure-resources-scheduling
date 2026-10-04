@@ -1,0 +1,17 @@
+// Q-E — Self-healing / drift correction (DEMO_TENANT_PLAN §8, scenarios S10/S11b).
+// W7 (PostgreSQL) manually started out of hours, then stopped by the next cycle;
+// and W5 going StoppedAllocated -> deallocated (H4). Point to make: drift is
+// corrected automatically — no surprise bills from forgotten resources.
+traces
+| where timestamp > ago(24h)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.resourceId"]) has_any ("rg-demo-db", "rg-demo-poweroff")
+| where tostring(customDimensions["pwrsched.action"]) in ("start", "stop")
+| project
+    timestamp,
+    resourceId  = tostring(customDimensions["pwrsched.resourceId"]),
+    type        = tostring(customDimensions["pwrsched.type"]),
+    actualState = tostring(customDimensions["pwrsched.actualState"]),
+    action      = tostring(customDimensions["pwrsched.action"]),
+    result      = tostring(customDimensions["pwrsched.result"])
+| order by timestamp asc

@@ -1,0 +1,17 @@
+// Q-A — Day timeline (DEMO_TENANT_PLAN §8).
+// Start/stop decisions on one weekday, by 15-minute bin and resource type.
+// Point to make: the schedule runs itself, in dependency order
+// (08:00 databases → 08:15 AKS/App Gateway → 08:30 VMs; stop at 17:30).
+//
+// Set the day you want to replay. Times are UTC in the data; the standard
+// profile is Asia/Bangkok (UTC+7), so 08:00 Bangkok = 01:00 UTC.
+let dayStart = datetime(2026-10-06 00:00:00);   // <-- set to a live weekday (UTC)
+traces
+| where timestamp >= dayStart and timestamp < dayStart + 1d
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.action"]) in ("start", "stop")
+| extend
+    action = tostring(customDimensions["pwrsched.action"]),
+    type   = tostring(customDimensions["pwrsched.type"])
+| summarize count() by bin(timestamp, 15m), action, type
+| order by timestamp asc, type asc

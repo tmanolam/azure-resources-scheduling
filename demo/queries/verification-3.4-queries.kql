@@ -1,0 +1,80 @@
+// VERIFICATION §3.4 — live verification of review findings (Queries 1–7).
+// These prove the fixed-but-live-dependent findings C3, H1, M4, N3, N4, N6.
+// collect-evidence.sh runs these; they are kept here for version control and
+// manual use. Run each block separately (they are independent statements).
+//
+// ---------------------------------------------------------------------------
+// Query 1 — decision fields (H1, N6): every OBS-001 field present; dryRun="true".
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(1h)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| project
+    runId        = customDimensions["pwrsched.runId"],
+    resourceId   = customDimensions["pwrsched.resourceId"],
+    type         = customDimensions["pwrsched.type"],
+    profile      = customDimensions["pwrsched.profile"],
+    desiredState = customDimensions["pwrsched.desiredState"],
+    actualState  = customDimensions["pwrsched.actualState"],
+    action       = customDimensions["pwrsched.action"],
+    dryRun       = customDimensions["pwrsched.dryRun"],
+    result       = customDimensions["pwrsched.result"],
+    error        = customDimensions["pwrsched.error"]
+| take 20;
+//
+// ---------------------------------------------------------------------------
+// Query 2 — SQL MI state (C3): actualState never Unknown. Needs a tagged SQL MI.
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(1h)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.type"]) =~ "Microsoft.Sql/managedInstances"
+| summarize count() by actualState = tostring(customDimensions["pwrsched.actualState"]);
+//
+// ---------------------------------------------------------------------------
+// Query 3 — invocations per hour (M4, N3): about 4 per hour.
+// ---------------------------------------------------------------------------
+requests
+| where timestamp > ago(3h)
+| where operation_Name == "reconcile"
+| summarize invocations = count() by bin(timestamp, 1h);
+//
+// ---------------------------------------------------------------------------
+// Query 4 — host storage errors (M4): expect empty.
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(3h)
+| where severityLevel >= 3
+| where message has_any ("AzureWebJobsStorage", "Storage", "lease", "AuthorizationPermissionMismatch")
+| project timestamp, message
+| take 20;
+//
+// ---------------------------------------------------------------------------
+// Query 5 — past-due run (M4): run ~5 min after the stop/start test restart.
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(30m)
+| where message startswith "pwrsched: timer past due"
+| project timestamp, message;
+//
+// ---------------------------------------------------------------------------
+// Query 6 — summaries per hour (N3): compare with Query 3 for the same window.
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(3h)
+| where customDimensions["pwrsched.event"] == "pwrsched.summary"
+| summarize summaries = count() by bin(timestamp, 1h);
+//
+// ---------------------------------------------------------------------------
+// Query 7 — mixed-case RG inheritance (N4): W2 in RG-Demo-MixedCase (or the
+// VERIFICATION test RG RG-PwrSched-CaseTest) inherits the RG's profile.
+// ---------------------------------------------------------------------------
+traces
+| where timestamp > ago(1h)
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.resourceId"]) contains "RG-Demo-MixedCase"
+    or tostring(customDimensions["pwrsched.resourceId"]) contains "RG-PwrSched-CaseTest"
+| project
+    resourceId = customDimensions["pwrsched.resourceId"],
+    profile    = customDimensions["pwrsched.profile"],
+    result     = customDimensions["pwrsched.result"];
