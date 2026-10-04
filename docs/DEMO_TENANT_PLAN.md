@@ -37,8 +37,8 @@ Tasks in this plan use the prefix **DM-** (`D-` is already used for decisions in
 | Subscription | Purpose | Management group | Subscription tag |
 |---|---|---|---|
 | `sub-demo-management` | Hosts the scheduler (Function App, App Config, monitoring) and Terraform state | `demo-platform-management` | `environment=platform` |
-| `sub-demo-corp-dev` | Main non-production workloads: every handler type and most scenarios | `demo-landingzones-corp` | `environment=dev` |
-| `sub-demo-corp-prod` | Production — proves the hard exclusion (C1, N5) | `demo-landingzones-corp` | `Environment=Prod` (deliberately mixed case, tests N5) |
+| `sub-demo-workload-dev` | Main non-production workloads: every handler type and most scenarios | `demo-workload-np` | `environment=dev` |
+| `sub-demo-workload-prod` | Production — proves the hard exclusion (C1, N5) | `demo-workload-prod` | `Environment=Prod` (deliberately mixed case, tests N5) |
 | `sub-demo-sandbox` | Subscription-level tag inheritance; nested-MG exclusion | `demo-sandbox` | `environment=sandbox`, `schedule-profile=sandbox-default` |
 
 **Plan A (preferred):** all four subscriptions draw on the credit. Whether a credit offer allows more than one subscription depends on the offer type; check this first (DM-02).
@@ -47,7 +47,7 @@ Tasks in this plan use the prefix **DM-** (`D-` is already used for decisions in
 
 | Plan B subscription | Holds | Notes |
 |---|---|---|
-| Credit subscription | Scheduler **and** all non-prod workloads | Place it in `demo-landingzones-corp`. Exclude the scheduler's own resource group with an RG scope in `excluded_scope_ids`. Sandbox scenarios S3 and S9 use resource groups instead (see §6). |
+| Credit subscription | Scheduler **and** all non-prod workloads | Place it in `demo-workload-np`. Exclude the scheduler's own resource group with an RG scope in `excluded_scope_ids`. Sandbox scenarios S3 and S9 use resource groups instead (see §6). |
 | One small Pay-As-You-Go subscription | Only W9 (the prod VM) | Tagged `Environment=Prod`. About USD 10/month, billed outside the credit. Needed for the live C1 check; without it C1 stays verified by unit tests only. |
 
 ### 2.2 Management group hierarchy (CAF-lite)
@@ -55,12 +55,13 @@ Tasks in this plan use the prefix **DM-** (`D-` is already used for decisions in
 ```
 Tenant Root Group
 └── demo  (intermediate root; role_assignable_scope)
-    ├── demo-platform ........................ excluded_scope_ids
+    ├── demo-platform ....................... excluded_scope_ids
     │   ├── demo-platform-management ........ sub-demo-management
     │   └── demo-platform-connectivity ...... (empty; no hub needed)
-    ├── demo-landingzones .................... in_scope_management_group_ids
-    │   └── demo-landingzones-corp .......... sub-demo-corp-dev, sub-demo-corp-prod
-    ├── demo-sandbox ......................... in_scope_management_group_ids
+    ├── demo-landingzones ................... in_scope_management_group_ids
+    │   └── demo-workload-np ................ sub-demo-workload-dev
+    |   └── demo-workload-prod .............. sub-demo-workload-prod
+    ├── demo-sandbox ........................ in_scope_management_group_ids
     │   └── demo-sandbox-excluded ........... excluded_scope_ids (S9: nested exclude)
     └── demo-decommissioned
 ```
