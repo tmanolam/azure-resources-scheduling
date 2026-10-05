@@ -37,6 +37,7 @@ items below.
 | T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant 2026-10-05; dry-run checklist §3.3 passing; C3/H2/N4 still to run, then ≥1 business day |
 | T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 complete, all live checks below, and V1 fixed) |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
+| V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | 🔍 Under investigation — identify the resource; blocks T-603 if it is a defect |
 
 ### Live checks carried over from the code review
 
@@ -204,6 +205,18 @@ Verify:
 
 If anything is wrong, fix config (tags / `terraform.tfvars` / profiles) and
 re-apply; the engine is idempotent, so no cleanup is needed.
+
+> **Reading dry-run results.** Dry run never starts or stops anything, so:
+>
+> - **After the evening stop time, every cycle logs `action=stop`** for each
+>   running scheduled resource, all night. That is expected, not an error.
+> - **Next morning there are no `start` decisions:** resources were never
+>   stopped, so they log "already converged" at 08:00–08:30.
+>
+> To observe start timing and dependency order in dry run, stop a few
+> resources by hand the evening before (for example stop a PostgreSQL server
+> and deallocate a VM). The next morning's dry-run cycles then log
+> `action=start` for the database at 08:00 and for the VM at 08:30.
 
 ### 3.4 Live verification of review findings
 
@@ -401,6 +414,8 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | §3.3 dry-run | ✅ Pass | Decision breakdown over 2 cycles: `already-converged`×12, `schedule-disabled`×2 (W4 opt-out), `unknown-state-skip`×2, `production-excluded`×2 (W9). 0 Platform-MG (`rg-demo-platform`/W11) resources in decisions. `dryRun=true`, no Activity-Log actions. | Kiro |
 | 2026-10-05 | C3 | ⬜ Not tested | No SQL MI in scope (W14/`enable_sqlmi` not deployed). §3.4 permits recording as "not tested: no SQL MI in scope" until W14 is deployed in Phase B. | Kiro |
 | 2026-10-05 | Product fixes (found during T-602 deploy) | ✅ Fixed | Four issues blocked first deploy, all fixed: (1) `infra/scheduler/providers.tf` — added `storage_use_azuread = true` (provider used shared-key for storage data-plane vs SEC-005 key-disabled → 403; also needed deployer Blob/Queue/Table data roles on state + runtime SAs); (2) `infra/modules/function_app/main.tf` — removed `FUNCTIONS_WORKER_RUNTIME` app setting (Flex Consumption rejects it, BadRequest 51021; runtime set via `runtime_name`); (3) `infra/modules/monitoring/main.tf` — renamed cycle-health measure column `cycles`→`cycleCount` (`cycles` is a reserved KQL keyword → "could not be parsed at ')'"); (4) runtime: platform auto-injected a key-based `AzureWebJobsStorage` connection string (empty key) that overrode the identity-based `AzureWebJobsStorage__*` settings and drained the host with 403s — removed via `az` (Terraform does not re-add it). Items 1–3 are product-code fixes that affect any tenant and should be reviewed/committed. | Kiro |
+| 2026-10-05 | V2 | 🔍 Issue opened | Review of the T-602 results: one in-scope resource reads as `unknown-state-skip` every cycle; see §6.1. | Claude |
+| 2026-10-05 | DP-01, DP-04, DP-05 | 🔴 Follow-ups recorded | Deploy-fix follow-ups recorded in `demo/TASKS.md` §8: DP-01 (deployer data roles not granted or documented), DP-04 (needs a code fix and a post-deploy check), DP-05 (duplicate `APPLICATIONINSIGHTS_CONNECTION_STRING` makes every plan show a change, which breaks the §4 go-live checkpoint). | Claude |
 
 ### 6.1 Issues found during verification
 
@@ -473,3 +488,48 @@ A node pool scale set can resolve a profile without anyone tagging it directly:
 
 **Interim mitigation until fixed:** never tag AKS node resource groups, and do
 not put a `schedule-profile` tag on a subscription that contains AKS clusters.
+
+#### V2 — One demo resource logged as `unknown-state-skip` every cycle
+
+| | |
+|---|---|
+| **Severity** | High (if confirmed as a defect) |
+| **Status** | 🔍 Under investigation |
+| **Found** | 2026-10-05, demo dry run (T-602) |
+| **Location** | To be determined: Resource Graph power-state projection (`src/engine/discovery.py`) or the handler's `get_state` fallback (`src/handlers/`) |
+| **Related** | FR-004, FR-033, M1, N7 |
+
+**Description.** The §3.3 breakdown over the first two cycles shows
+`already-converged`×12, `schedule-disabled`×2 (W4), `production-excluded`×2 (W9)
+and `unknown-state-skip`×2 — 9 resources per cycle, so **exactly one in-scope
+resource reads as Unknown every cycle**. A resource whose state is Unknown is
+never started or stopped, so in live mode it would silently stay running.
+
+The candidates are W1, W2, W3, W5, W6 (VM scale set), W7 (PostgreSQL) and W8
+(MySQL). W6 is the most likely: scale sets have no power state in Resource Graph,
+so their state comes from the `get_state` fallback (`get_instance_view`); a
+failure or unexpected status there normalises to Unknown.
+
+**Next steps.**
+
+1. Identify the resource:
+   ```kusto
+   traces
+   | where timestamp > ago(1h)
+   | where customDimensions["pwrsched.event"] == "pwrsched.decision"
+   | where tostring(customDimensions["pwrsched.result"]) == "unknown-state-skip"
+   | project timestamp, resourceId = tostring(customDimensions["pwrsched.resourceId"]),
+             type = tostring(customDimensions["pwrsched.type"]),
+             actual = tostring(customDimensions["pwrsched.actualState"]),
+             error = tostring(customDimensions["pwrsched.error"])
+   ```
+2. Compare with what Azure reports for that resource (for a scale set:
+   `az vmss get-instance-view -g <rg> -n <name> --query statuses`; for a database:
+   `az postgres flexible-server show … --query state` / `az mysql flexible-server show … --query state`).
+3. If it is a defect, fix the state mapping, add a unit test with the real status
+   values, and re-run the check in dry run.
+
+**Acceptance criteria.**
+
+- [ ] The resource is identified and the root cause recorded here.
+- [ ] After any fix, a full dry-run cycle shows **0** `unknown-state-skip` results for in-scope resources.
