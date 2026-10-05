@@ -24,10 +24,14 @@ resource "azurerm_storage_account" "this" {
 }
 
 # Deployment package / runtime container used by Flex Consumption.
+# Created over the data plane (shared keys disabled, SEC-005), so it needs the
+# deployer's Storage Blob Data Owner role to exist first (DP-01 follow-up).
 resource "azurerm_storage_container" "deployments" {
   name                  = "deployments"
   storage_account_id    = azurerm_storage_account.this.id
   container_access_type = "private"
+
+  depends_on = [azurerm_role_assignment.deployer_blob_owner]
 }
 
 # The identity needs data-plane access to the runtime storage (SEC-004),
@@ -54,6 +58,32 @@ resource "azurerm_role_assignment" "identity_table_contributor" {
   role_definition_name = "Storage Table Data Contributor"
   principal_id         = var.identity_principal_id
   principal_type       = "ServicePrincipal"
+}
+
+# DP-01 follow-up: the deployer (the principal running Terraform) also needs
+# data-plane roles on the runtime storage account. With shared keys disabled
+# (SEC-005) and storage_use_azuread=true, the azurerm provider reads blob,
+# queue and table properties over the data plane during refresh/plan/apply; a
+# deployer without these roles gets 403 KeyBasedAuthenticationNotPermitted (and
+# the operator previously had to grant them by hand). Granting them in
+# Terraform — mirroring the App Configuration Data Owner grant for the deployer
+# — makes the first apply self-sufficient on the runtime SA.
+resource "azurerm_role_assignment" "deployer_blob_owner" {
+  scope                = azurerm_storage_account.this.id
+  role_definition_name = "Storage Blob Data Owner"
+  principal_id         = var.deployer_object_id
+}
+
+resource "azurerm_role_assignment" "deployer_queue_contributor" {
+  scope                = azurerm_storage_account.this.id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = var.deployer_object_id
+}
+
+resource "azurerm_role_assignment" "deployer_table_contributor" {
+  scope                = azurerm_storage_account.this.id
+  role_definition_name = "Storage Table Data Contributor"
+  principal_id         = var.deployer_object_id
 }
 
 # --- Flex Consumption plan (D-01, A-03) -------------------------------------
@@ -103,8 +133,15 @@ resource "azurerm_function_app_flex_consumption" "this" {
     # Note: FUNCTIONS_WORKER_RUNTIME must NOT be set as an app setting on Flex
     # Consumption sites (the platform rejects it with BadRequest 51021); the
     # runtime is configured via runtime_name/runtime_version above.
-    # Telemetry export to Application Insights via OpenTelemetry (H1).
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = var.app_insights_connection_string
+    #
+    # DP-05: APPLICATIONINSIGHTS_CONNECTION_STRING is intentionally NOT set here.
+    # Telemetry export to Application Insights (H1) is configured via
+    # site_config.application_insights_connection_string below. Azure echoes
+    # that value into app_settings, so declaring it in both places made every
+    # `terraform plan` show "1 to change" on the Function App forever, breaking
+    # IAC-008 and the VERIFICATION §4 go-live checkpoint ("the plan's only
+    # change is pwrsched:dryRun"). Keeping it only in site_config leaves the
+    # plan clean.
 
     # Host storage for the timer singleton lease and schedule monitor
     # (use_monitor=True / IsPastDue recovery). With shared keys disabled this
@@ -113,6 +150,18 @@ resource "azurerm_function_app_flex_consumption" "this" {
     "AzureWebJobsStorage__accountName" = azurerm_storage_account.this.name
     "AzureWebJobsStorage__credential"  = "managedidentity"
     "AzureWebJobsStorage__clientId"    = var.identity_client_id
+
+    # DP-04: pin the bare `AzureWebJobsStorage` setting to an empty string.
+    # The azurerm provider re-injects a key-based connection string even in
+    # identity mode (hashicorp/terraform-provider-azurerm#29149). With shared
+    # keys disabled (SEC-005) that injected setting is a dead, key-based
+    # connection that OVERRIDES the identity-based `AzureWebJobsStorage__*`
+    # settings above: the host then fails to acquire the timer singleton lease
+    # and drains with storage auth 403s. Declaring it empty here makes
+    # Terraform own the key and assert the empty value on every apply, so the
+    # poisoned connection can never be reintroduced (replaces the earlier
+    # one-off `az` runtime workaround).
+    "AzureWebJobsStorage" = ""
   }
 
   site_config {

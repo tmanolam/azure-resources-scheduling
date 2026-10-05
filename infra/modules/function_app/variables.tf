@@ -38,6 +38,11 @@ variable "identity_principal_id" {
   description = "Principal (object) ID of the user-assigned managed identity, for the storage data-plane role assignment (SEC-004)."
 }
 
+variable "deployer_object_id" {
+  type        = string
+  description = "Object ID of the principal running Terraform. Granted data-plane roles on the runtime storage account so refresh/plan/apply can read it with shared keys disabled (SEC-005, DP-01 follow-up)."
+}
+
 variable "app_config_endpoint" {
   type        = string
   description = "App Configuration data-plane endpoint."

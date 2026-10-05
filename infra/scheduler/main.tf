@@ -115,6 +115,7 @@ module "function_app" {
   identity_id                    = azurerm_user_assigned_identity.this.id
   identity_client_id             = azurerm_user_assigned_identity.this.client_id
   identity_principal_id          = azurerm_user_assigned_identity.this.principal_id
+  deployer_object_id             = data.azurerm_client_config.current.object_id
   app_config_endpoint            = module.app_config.endpoint
   app_insights_connection_string = module.monitoring.application_insights_connection_string
   reconcile_schedule             = var.reconcile_schedule

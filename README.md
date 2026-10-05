@@ -126,7 +126,7 @@ azure-power-scheduler/
 | Each in-scope management group (e.g. Landing Zones, Sandbox) | Owner, or User Access Administrator + permission to write role definitions | Create the custom role and assign it to the managed identity |
 | State storage account | Storage Blob Data Contributor | Read/write Terraform state with Entra ID auth |
 
-> 📝 Note: Terraform grants the deployer **App Configuration Data Owner** on the store so it can write configuration keys. Role propagation can take a few minutes; see [Troubleshooting](#troubleshooting) if the first apply returns `403`.
+> 📝 Note: Terraform grants the deployer **App Configuration Data Owner** on the store (so it can write configuration keys) and the runtime storage account data roles — **Storage Blob Data Owner**, **Storage Queue Data Contributor** and **Storage Table Data Contributor** — so it can read/write that account over the data plane with shared keys disabled (SEC-005). You only need to grant yourself **Storage Blob Data Contributor** on the *state* storage account by hand (Step 2), because that account exists before Terraform runs. Role propagation can take a few minutes; see [Troubleshooting](#troubleshooting) if the first apply returns `403`.
 
 ### Network
 
@@ -270,7 +270,7 @@ Review the plan. For a first deployment you should see creations of roughly thes
 - Application Insights, alert rules and action group;
 - custom role definition **Resource Power Operator**;
 - one role assignment per in-scope management group;
-- data-plane role assignments (App Configuration Data Reader and Storage roles for the identity; App Configuration Data Owner for you).
+- data-plane role assignments (App Configuration Data Reader and Storage roles for the identity; App Configuration Data Owner and the runtime storage Blob/Queue/Table data roles for you).
 
 Make sure the plan contains **no** role assignment at the Platform MG or the Tenant Root Group. Then apply:
 
@@ -538,6 +538,7 @@ az tag update --operation Merge --resource-id "<resource-id>" --tags schedule-en
 |---|---|---|
 | `terraform init` fails with `403 AuthorizationPermissionMismatch` | No Storage Blob Data Contributor on the state account, or not yet propagated | Assign the role (Step 2) and wait a few minutes |
 | `terraform apply` fails writing App Configuration keys with `403` | Data Owner role assigned in the same apply has not propagated | Wait 2–5 minutes and run `terraform apply` again |
+| `terraform plan`/`apply` fails reading the runtime storage account with `403 KeyBasedAuthenticationNotPermitted` | The deployer's Blob/Queue/Table data roles on the runtime storage account were assigned in the same apply and have not propagated | Wait 2–5 minutes and re-run; the roles are granted by Terraform (DP-01) |
 | `terraform apply` fails creating the role definition or assignment at an MG | Missing permissions at the management group | Ask for Owner / User Access Administrator at that MG (see Prerequisites) |
 | App Configuration keys time out during apply | Private networking enabled and no private connectivity from your machine | Run Terraform from a host with access to the private endpoint |
 | `func ... publish` fails: "Can't find app" | Wrong subscription selected in the CLI | `az account set --subscription <management-subscription-id>` |
