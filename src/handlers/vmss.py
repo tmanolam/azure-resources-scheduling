@@ -1,4 +1,4 @@
-"""Virtual Machine Scale Set handler (T-302).
+"""Virtual Machine Scale Set handler (T-302, V2, V3).
 
 Handler key ``vmss`` → ``Microsoft.Compute/virtualMachineScaleSets`` (§8.1).
 
@@ -10,10 +10,22 @@ resource. A Uniform-mode scale set's own instance view
 (``virtual_machine_scale_sets.get_instance_view``) reports only provisioning
 state and *statusesSummary* — it carries no ``PowerState/*`` status — so reading
 it returned ``unknown`` for a perfectly healthy, running scale set (verification
-issue V2). Power state lives on the individual VMs, read via
-``virtual_machine_scale_set_vms``.
+issue V2). Power state lives on the individual VMs.
 
-Aggregation (across all instances):
+Orchestration mode matters (V3):
+
+- **Uniform:** instances are read via ``virtual_machine_scale_set_vms``. We use
+  ``list(expand="instanceView")`` so one call returns every member's power state
+  (one call per cycle instead of 1 + N).
+- **Flexible:** Azure does not expose members through
+  ``virtual_machine_scale_set_vms``; members are ordinary VMs. Phase 1 does not
+  support power-managing a Flexible scale set through this handler, so
+  ``get_state`` raises ``HandlerSkip("vmss-flexible-unsupported")`` — logged as a
+  skip, never counted as a failure, never retried (HR-008). To schedule those
+  workloads, tag the member VMs (the ``vm`` handler acts on each), not the scale
+  set. Do not tag both (HR-008).
+
+Aggregation (across all instances, Uniform):
 
 - any instance ``running``            → ``running``   (so a running VMSS is stopped)
 - all instances ``deallocated``       → ``deallocated`` (already converged)
@@ -30,7 +42,7 @@ import logging
 
 from engine.models import ResourceRecord
 
-from .base import BaseHandler, parse_resource_name, register
+from .base import BaseHandler, HandlerSkip, parse_resource_name, register
 
 logger = logging.getLogger("pwrsched.handlers.vmss")
 
@@ -40,8 +52,17 @@ _TRANSITIONAL = {"starting", "stopping", "deallocating"}
 
 
 def _instance_power_state(iv) -> str:
-    """Extract the lowercase ``PowerState/*`` suffix from an instance view, or ''."""
-    for status in getattr(iv, "statuses", None) or []:
+    """Extract the lowercase ``PowerState/*`` suffix from an instance view, or ''.
+
+    ``iv`` may be an instance-view object (``.statuses``) or, with
+    ``list(expand="instanceView")``, the instance itself carrying an
+    ``.instance_view`` attribute.
+    """
+    statuses = getattr(iv, "statuses", None)
+    if statuses is None:
+        inner = getattr(iv, "instance_view", None)
+        statuses = getattr(inner, "statuses", None) if inner is not None else None
+    for status in statuses or []:
         code = getattr(status, "code", "") or ""
         if code.lower().startswith("powerstate/"):
             return code.split("/", 1)[1].lower()
@@ -55,15 +76,25 @@ class VmssHandler(BaseHandler):
     def get_state(self, resource: ResourceRecord) -> str:
         client = self._client(resource)
         name = parse_resource_name(resource.resource_id)
+
+        # V3: Flexible scale sets don't expose members via scale_set_vms. Skip
+        # (logged, not a failure); their member VMs are scheduled individually.
+        mode = self._orchestration_mode(client, resource, name)
+        if mode == "flexible":
+            raise HandlerSkip("vmss-flexible-unsupported")
+
         vm_ops = client.virtual_machine_scale_set_vms
 
+        # One call returns every member's instanceView (V3 cost fix); fall back to
+        # per-instance get_instance_view if an instance view is not inlined.
         states: list[str] = []
-        for inst in vm_ops.list(resource.resource_group, name):
-            instance_id = getattr(inst, "instance_id", None)
-            if instance_id is None:
-                continue
-            iv = vm_ops.get_instance_view(resource.resource_group, name, instance_id)
-            ps = _instance_power_state(iv)
+        for inst in vm_ops.list(resource.resource_group, name, expand="instanceView"):
+            ps = _instance_power_state(inst)
+            if not ps:
+                instance_id = getattr(inst, "instance_id", None)
+                if instance_id is not None:
+                    iv = vm_ops.get_instance_view(resource.resource_group, name, instance_id)
+                    ps = _instance_power_state(iv)
             if ps:
                 states.append(ps)
 
@@ -90,6 +121,17 @@ class VmssHandler(BaseHandler):
         if all(s == "deallocated" for s in states):
             return "deallocated"
         return "stopped-allocated"
+
+    @staticmethod
+    def _orchestration_mode(client, resource: ResourceRecord, name: str) -> str:
+        """Return the scale set's orchestration mode in lower case ('uniform' /
+        'flexible'), or '' if it cannot be determined (treated as Uniform)."""
+        try:
+            ss = client.virtual_machine_scale_sets.get(resource.resource_group, name)
+        except Exception as exc:  # defensive: fall back to Uniform behaviour
+            logger.warning("pwrsched.handlers.vmss: get() failed for %s: %s", name, exc)
+            return ""
+        return (getattr(ss, "orchestration_mode", "") or "").lower()
 
     def start(self, resource: ResourceRecord) -> None:
         client = self._client(resource)

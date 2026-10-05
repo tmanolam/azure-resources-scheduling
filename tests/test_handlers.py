@@ -149,25 +149,49 @@ def test_normalise_succeeded_is_unknown_not_running():
 
 # --- VMSS --------------------------------------------------------------------
 
-def _vmss_client(instance_power_states, calls):
+def _vmss_client(instance_power_states, calls, *, mode="Uniform", inline_iv=True,
+                 track=None):
     """Fake ComputeManagementClient whose scale-set VMs report the given power
     states. ``instance_power_states`` is a list; each entry becomes one instance
     with a ``PowerState/<state>`` status. ``None`` means an instance with no
-    power-state status (e.g. provisioning only)."""
-    instances = [_ns(instance_id=str(i)) for i in range(len(instance_power_states))]
+    power-state status.
 
-    def _list(rg, n):
-        return list(instances)
+    - ``mode``: orchestration mode returned by ``virtual_machine_scale_sets.get``.
+    - ``inline_iv``: when True, ``list(expand='instanceView')`` inlines the
+      instance view on each instance (the single-call path). When False, ``list``
+      returns bare instances and the handler must call ``get_instance_view``.
+    - ``track``: optional dict to record call counts for assertions.
+    """
+    track = track if track is not None else {}
 
-    def _get_iv(rg, n, instance_id):
-        state = instance_power_states[int(instance_id)]
+    def _mk_iv(state):
         statuses = [_ns(code="ProvisioningState/succeeded")]
         if state is not None:
             statuses.append(_ns(code=f"PowerState/{state}"))
         return _ns(statuses=statuses)
 
+    def _list(rg, n, expand=None):
+        track["list"] = track.get("list", 0) + 1
+        track["list_expand"] = expand
+        out = []
+        for i, state in enumerate(instance_power_states):
+            if inline_iv:
+                out.append(_ns(instance_id=str(i), instance_view=_mk_iv(state)))
+            else:
+                out.append(_ns(instance_id=str(i)))
+        return out
+
+    def _get_iv(rg, n, instance_id):
+        track["get_iv"] = track.get("get_iv", 0) + 1
+        return _mk_iv(instance_power_states[int(instance_id)])
+
+    def _get(rg, n):
+        track["get"] = track.get("get", 0) + 1
+        return _ns(orchestration_mode=mode)
+
     vm_ops = _ns(list=_list, get_instance_view=_get_iv)
     ss_ops = _ns(
+        get=_get,
         begin_start=lambda rg, n: calls.append(("start", n)),
         begin_deallocate=lambda rg, n: calls.append(("deallocate", n)),
     )
@@ -227,6 +251,35 @@ def test_vmss_transitional_when_none_running():
 def test_vmss_running_wins_over_transitional():
     h = VmssHandler(lambda s: _vmss_client(["starting", "running"], []))
     assert h.get_state(_vmss_rec()) == "running"
+
+
+# V3 — orchestration mode
+
+def test_vmss_v3_flexible_raises_handler_skip():
+    h = VmssHandler(lambda s: _vmss_client(["running"], [], mode="Flexible"))
+    with pytest.raises(HandlerSkip) as ei:
+        h.get_state(_vmss_rec())
+    assert ei.value.reason == "vmss-flexible-unsupported"
+
+
+def test_vmss_v3_uniform_uses_single_list_expand_call():
+    # One list(expand="instanceView") call, no per-instance get_instance_view.
+    track = {}
+    h = VmssHandler(lambda s: _vmss_client(["running", "deallocated"], [],
+                                           mode="Uniform", inline_iv=True, track=track))
+    assert h.get_state(_vmss_rec()) == "running"
+    assert track.get("list") == 1
+    assert track.get("list_expand") == "instanceView"
+    assert track.get("get_iv", 0) == 0
+
+
+def test_vmss_v3_falls_back_to_get_instance_view_when_not_inlined():
+    # If list does not inline the instance view, fall back per instance.
+    track = {}
+    h = VmssHandler(lambda s: _vmss_client(["running"], [],
+                                           mode="Uniform", inline_iv=False, track=track))
+    assert h.get_state(_vmss_rec()) == "running"
+    assert track.get("get_iv", 0) >= 1
 
 
 # --- AKS (HR-002) ------------------------------------------------------------

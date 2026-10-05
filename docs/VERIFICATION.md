@@ -35,10 +35,10 @@ items below.
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ✅ Done for the **demo tenant** (`infra/tenants/demo.tfvars`); each real tenant still needs its own |
 | T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed + re-applied to demo tenant 2026-10-05; dry-run checklist §3.3 passing; §3.4 Q1/3/4/6 pass; V2 fixed & confirmed live. Still to run: C3 (no SQL MI), H2 (alerts), N4 (mixed-case fixture), M4 past-due, then ≥1 business day |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, all live checks below, V1 fixed (live S18), and the DP-05 §4-checkpoint blocker resolved (residual `AzureWebJobsStorage` plan diff; see `demo/TASKS.md` §8). V2 is fixed |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, all live checks below, V1 fixed (live S18), and the DP-05 §4-checkpoint blocker resolved (residual `AzureWebJobsStorage` plan diff; see `demo/TASKS.md` §8). V2 and V3 are fixed in code (V3 live check needs a Flexible scale set, not in the demo) |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
-| V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | 🔴 Open — code fix needed; blocks T-603 for any tenant with Flexible scale sets |
+| V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | ✅ Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008) — live check pending (no Flexible VMSS in the demo) |
 
 ### Live checks carried over from the code review
 
@@ -443,6 +443,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | M4, N3, H1, N6 | ✅ Pass (live) | §3.4 Queries 1/3/4/6 after re-deploy. Q1: all decision records carry OBS-001 fields, `dryRun="true"` (H1/N6). Q3: `reconcile` ≈ 1 invocation/15 min. **Q4: EMPTY — no host storage auth errors (DP-04 confirmed live)**. Q6: `pwrsched.summary` count = invocation count (N3). | Kiro |
 | 2026-10-05 | V2 | ✅ Fixed + confirmed live | Identified via §3.4 Q1 as **W6 `vmss-demo-w6`**. Root cause: `vmss` handler read the scale-set-level instance view, which carries no `PowerState/*` for Uniform VMSS → `unknown`. Fixed `src/handlers/vmss.py` to aggregate per-instance power states (`virtual_machine_scale_set_vms.list`/`get_instance_view`); 8 unit tests + SDK-surface rows added (156 passed/8 skipped, ruff clean). Re-published code; **14:00 UTC cycle shows 0 `unknown-state-skip`** (W6 now `already-converged`, `actualState=Stopped`). Remaining: observe W6 while **running** (Phase B/S1L) for the running→deallocate path. | Kiro |
 | 2026-10-05 | V2 review, V3, N4, DP-05 | 🔍 Review recorded | Review of `96fb97c` + `8eee22f`: V2 fix correct for Uniform scale sets; 164 tests pass with SDKs, strict SDK surface 8 passed, ruff clean. Opened **V3** (Flexible-mode scale sets unsupported by the per-instance read; see §6.1). N4 can use W2's `RG-Demo-MixedCase` (§3.4 note). DP-05 recommendation recorded in `demo/TASKS.md` §8. Tomorrow's dry run should log `action=start` for W7/W8 at 08:00 and W1/W2/W3/W5/W6 at 08:30 Bangkok (S1/S12; 08:15 slot empty without W12/W13). | Claude |
+| 2026-10-05 | V3 | ✅ Fixed in code | `src/handlers/vmss.py` now reads `orchestration_mode` first: **Uniform** → `virtual_machine_scale_set_vms.list(expand="instanceView")` (one call, falls back to per-instance `get_instance_view` if not inlined) then aggregates; **Flexible** → `HandlerSkip("vmss-flexible-unsupported")`. `src/engine/reconcile.py` `_prefetch_fallback_states` now distinguishes a `HandlerSkip` from a read failure, so a Flexible VMSS is logged `skip:vmss-flexible-unsupported` (not `state-read-failed`) and `failed == 0`. Added REQUIREMENTS **HR-008**; 5 new/updated vmss unit tests + 2 reconcile tests + `virtual_machine_scale_sets.get` in the SDK-surface matrix. Suite **161 passed / 8 skipped**, ruff clean. Live check (a real Flexible scale set) carried forward — none in the demo. | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -572,7 +573,7 @@ ruff clean.
 | | |
 |---|---|
 | **Severity** | Medium (High for tenants that use Flexible scale sets) |
-| **Status** | 🔴 Open — code fix needed |
+| **Status** | ✅ Fixed in code (2026-10-05) — live check pending (no Flexible VMSS in the demo tenant) |
 | **Found** | 2026-10-05, review of the V2 fix (`96fb97c`) |
 | **Location** | `src/handlers/vmss.py` (`get_state`) |
 | **Related** | V2, FR-004, HR-001, NFR-002 |
@@ -609,10 +610,18 @@ Related points:
 
 **Acceptance criteria.**
 
-- [ ] Unit tests: Uniform scale set (running / deallocated / stopped-allocated);
-  Flexible scale set (handled or skipped with `vmss-flexible-unsupported`,
-  `failed == 0`); the single-call `expand="instanceView"` path.
-- [ ] SDK surface test covers any new client calls.
+- [x] Unit tests: Uniform scale set (running / deallocated / stopped-allocated /
+  transitional / capacity 0); Flexible scale set skipped with
+  `vmss-flexible-unsupported` (`failed == 0`, logged as `skip:` not
+  `state-read-failed`); the single-call `expand="instanceView"` path (one `list`,
+  no per-instance `get_instance_view`). *(tests/test_handlers.py `test_vmss_*`,
+  tests/test_reconcile.py `test_fallback_handler_skip_*`)*
+- [x] SDK surface test covers the new client calls (`virtual_machine_scale_sets.get`,
+  `virtual_machine_scale_set_vms.list`/`get_instance_view`).
+- [x] Handler requirement recorded (REQUIREMENTS §8.2 **HR-008**): Uniform
+  aggregation; Flexible skipped; tag member VMs not the scale set (and not both).
 - [ ] If a Flexible scale set is available in the demo tenant: one dry-run cycle
-  shows the expected result for it, and no `state-read-failed`.
+  shows `skip:vmss-flexible-unsupported` for it, and no `state-read-failed`.
+  (Not available in the current demo — W6 is Uniform; carry to a tenant that has
+  a Flexible scale set.)
 

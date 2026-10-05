@@ -169,5 +169,19 @@ resource "azurerm_function_app_flex_consumption" "this" {
     application_insights_connection_string = var.app_insights_connection_string
   }
 
+  # DP-05: stop the perpetual plan diff. The provider re-injects a key-based
+  # `AzureWebJobsStorage` value (azurerm#29149), and the DP-04 empty-string pin
+  # above makes Terraform want to reset it to "" on *every* plan — which breaks
+  # the VERIFICATION §4 go-live checkpoint ("the plan's only change is
+  # pwrsched:dryRun"). Ignoring post-create changes to just this one key removes
+  # the diff while still setting "" at creation. The safety net against a
+  # re-injected *key-based* value is the VERIFICATION §3.2 host-storage
+  # checkpoint, run after every apply and code publish. This is preferred over
+  # documenting a permanent §4 exception, because a diff in every plan trains
+  # operators to ignore plan output.
+  lifecycle {
+    ignore_changes = [app_settings["AzureWebJobsStorage"]]
+  }
+
   tags = var.tags
 }

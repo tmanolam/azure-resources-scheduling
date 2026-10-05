@@ -167,7 +167,7 @@ def _prefetch_fallback_states(
     selections: Sequence[SelectionResult],
     handlers: Mapping[str, Handler],
     max_parallel_arm_calls: int,
-) -> dict[str, ActualState]:
+) -> tuple[dict[str, ActualState], dict[str, str]]:
     """Read actual state for fallback resources concurrently (N7, M1).
 
     Only resources whose state is absent from Resource Graph
@@ -176,10 +176,15 @@ def _prefetch_fallback_states(
     sized by ``max_parallel_arm_calls`` (NFR-005) instead of sequentially, which
     keeps a large cycle within the 5-minute budget (NFR-002).
 
-    Returns a map of resource_id -> ActualState for the fallback resources only;
-    resources whose read raised are omitted (the sequential planner then records
-    ``state-read-failed`` for them). Resources with a Resource Graph power state
-    are not included here — the planner reads those directly (no ARM call).
+    Returns two maps for the fallback resources only:
+
+    - ``states``: resource_id -> ActualState for reads that succeeded.
+    - ``skips``: resource_id -> reason when ``get_state`` raised ``HandlerSkip``
+      (e.g. a Flexible scale set, V3/HR-008). These are logged as a skip, not
+      ``state-read-failed`` (HR-001/HR-004).
+
+    A resource that is in neither map had a genuine read failure; the planner
+    records ``state-read-failed`` for it.
     """
     targets = [
         sel.resource
@@ -189,26 +194,33 @@ def _prefetch_fallback_states(
         and _needs_fallback_read(sel.resource)
     ]
     if not targets:
-        return {}
+        return {}, {}
 
     # Deduplicate by resource_id to avoid reading the same resource twice.
     unique: dict[str, ResourceRecord] = {r.resource_id: r for r in targets}
     workers = max(1, min(int(max_parallel_arm_calls or 1), len(unique)))
 
-    def _read(r: ResourceRecord) -> tuple[str, Optional[ActualState]]:
+    def _read(r: ResourceRecord) -> tuple[str, Optional[ActualState], Optional[str]]:
         handler = handlers[r.handler_key]
         try:
-            return r.resource_id, _normalise_actual(handler.get_state(r))
+            return r.resource_id, _normalise_actual(handler.get_state(r)), None
         except Exception as exc:  # defensive: a read failure must not abort the cycle
+            skip_reason = _handler_skip_reason(exc)
+            if skip_reason is not None:
+                # Expected skip (HR-001/HR-004/HR-008), not a failure.
+                return r.resource_id, None, skip_reason
             logger.warning("pwrsched.reconcile: get_state failed for %s: %s", r.resource_id, exc)
-            return r.resource_id, None
+            return r.resource_id, None, None
 
     states: dict[str, ActualState] = {}
+    skips: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="arm-getstate") as pool:
-        for rid, state in pool.map(_read, unique.values()):
+        for rid, state, skip_reason in pool.map(_read, unique.values()):
             if state is not None:
                 states[rid] = state
-    return states
+            elif skip_reason is not None:
+                skips[rid] = skip_reason
+    return states, skips
 
 
 def plan_actions(
@@ -233,7 +245,9 @@ def plan_actions(
 
     # N7: prefetch the fallback (ARM) state reads concurrently; resources with a
     # Resource Graph power state are resolved directly below without an ARM call.
-    fallback_states = _prefetch_fallback_states(selections, handlers, max_parallel_arm_calls)
+    fallback_states, fallback_skips = _prefetch_fallback_states(
+        selections, handlers, max_parallel_arm_calls
+    )
 
     for sel in selections:
         r = sel.resource
@@ -263,10 +277,15 @@ def plan_actions(
             continue
 
         if _needs_fallback_read(r):
-            # Resolved by the prefetch pool. Absent => the read failed.
+            # Resolved by the prefetch pool. Absent => either the handler asked to
+            # skip (HandlerSkip, e.g. a Flexible scale set — V3/HR-008) or the read
+            # failed. A skip is logged as skip:<reason>, not state-read-failed, so
+            # it is not counted as a failure or retried (HR-001/HR-004).
             actual = fallback_states.get(r.resource_id)
             if actual is None:
-                planned.append(_none_action(r, "state-read-failed", sel.profile_name,
+                skip_reason = fallback_skips.get(r.resource_id)
+                reason = f"skip:{skip_reason}" if skip_reason else "state-read-failed"
+                planned.append(_none_action(r, reason, sel.profile_name,
                                             sel.order or 3, decision.warning))
                 continue
         else:

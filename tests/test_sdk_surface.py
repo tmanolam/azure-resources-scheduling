@@ -47,7 +47,7 @@ _SURFACE = [
         "azure.mgmt.compute",
         "ComputeManagementClient",
         "virtual_machine_scale_sets",
-        ["begin_start", "begin_deallocate"],
+        ["get", "begin_start", "begin_deallocate"],
     ),
     (
         "vmss",

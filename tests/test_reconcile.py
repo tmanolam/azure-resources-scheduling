@@ -358,3 +358,40 @@ def test_fallback_read_failure_is_state_read_failed():
     assert len(planned) == 1
     assert planned[0].action is ActionType.NONE
     assert planned[0].reason == "state-read-failed"
+
+
+def test_fallback_handler_skip_is_logged_skip_not_failed():
+    # V3/HR-008: get_state raising HandlerSkip during the prefetch (e.g. a
+    # Flexible scale set) must be logged as skip:<reason>, not state-read-failed,
+    # and must not count as a failure.
+    from engine.models import ActionType
+    from engine.reconcile import plan_actions
+
+    class SkipStateHandler(FakeHandler):
+        def get_state(self, resource):
+            raise _Skip("vmss-flexible-unsupported")
+
+    planned = plan_actions([_sel("ss1", handler="vmss")], now=_friday_6pm(),
+                           profile_provider=_profiles,
+                           handlers={"vmss": SkipStateHandler("x")})
+    assert len(planned) == 1
+    assert planned[0].action is ActionType.NONE
+    assert planned[0].reason == "skip:vmss-flexible-unsupported"
+
+
+def test_fallback_handler_skip_summary_not_failed():
+    # The same skip through the full run_reconcile: failed == 0 and the resource
+    # is counted as skipped (non-actionable). The skip:<reason> is carried on the
+    # planned action's reason and emitted by telemetry (emit_decision uses
+    # action.reason as the result for non-actionable decisions).
+    class SkipStateHandler(FakeHandler):
+        def get_state(self, resource):
+            raise _Skip("vmss-flexible-unsupported")
+
+    summary = run_reconcile([_sel("ss1", handler="vmss")], now=_friday_6pm(), run_id="r1",
+                            profile_provider=_profiles,
+                            handlers={"vmss": SkipStateHandler("x")},
+                            config=ReconcileConfig(dry_run=True))
+    assert summary.failed == 0
+    assert summary.evaluated == 1
+    assert summary.skipped >= 1
