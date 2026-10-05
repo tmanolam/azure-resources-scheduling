@@ -38,6 +38,7 @@ items below.
 | T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, all live checks below, V1 fixed (live S18), and the DP-05 §4-checkpoint blocker resolved (residual `AzureWebJobsStorage` plan diff; see `demo/TASKS.md` §8). V2 is fixed |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
+| V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | 🔴 Open — code fix needed; blocks T-603 for any tenant with Flexible scale sets |
 
 ### Live checks carried over from the code review
 
@@ -53,7 +54,7 @@ must pass before T-603. Background on each ID is in
 | H2 | Cycle-health and cycle-exceptions alerts fire | [§5](#5-alert-verification-obs-003004005) | 🔍 Pending — alert-firing tests (S15) not run yet |
 | M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | 🟡 Partial — timer fires 1/15 min, 0 storage auth errors (Q3/Q4 pass); past-due test (Q5) not run yet |
 | N3 | Summary count matches invocation count | §3.4, Queries 3 and 6 | ✅ Pass (demo 2026-10-05: 1 summary = 1 invocation per 15m bin) |
-| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending — dedicated `RG-PwrSched-CaseTest` fixture not created (W2 `RG-Demo-MixedCase` exists but isn't the N4 query target) |
+| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending — no new fixture needed in the demo: run Query 7 with `RG-Demo-MixedCase` (W2's resource group, tagged only at RG level) |
 | N6 | `dryRun` stored as `true` | §3.4, Query 1 | ✅ Pass (demo 2026-10-05: all decisions `dryRun = true`, lowercase) |
 
 ---
@@ -317,7 +318,9 @@ q 'traces | where timestamp > ago(3h) | where customDimensions["pwrsched.event"]
 | summarize summaries = count() by bin(timestamp, 1h)'
 ```
 
-**Mixed-case RG test (N4):** create a resource group with a mixed-case name in
+**Mixed-case RG test (N4):** in the demo tenant, W2's resource group
+`RG-Demo-MixedCase` already meets these conditions, so run Query 7 with that name
+instead of creating a new fixture. Otherwise, create a resource group with a mixed-case name in
 an in-scope, non-production subscription (for example `RG-PwrSched-CaseTest`),
 put one small VM with no schedule tags of its own in it, and tag **only the resource group** with
 `schedule-profile=weekday-0830-1730`. Delete the resource group after the test.
@@ -439,6 +442,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | DP-05, DP-06 | 🟡 Partial / open | **No-drift checkpoint NOT clean:** post-apply `plan` shows `0 add / 1 change / 0 destroy` — a *perpetual, benign* `app_settings.AzureWebJobsStorage → null` diff (azurerm #29149: platform re-injects an empty bare value; Terraform keeps wanting it null). The `hidden-link` App Insights tag diff has settled. This recurring diff means the strict §4 go-live checkpoint ("only change is `pwrsched:dryRun`") **cannot pass as-is** — DP-05 is a known upstream issue, not resolved by the duplicate-conn-string removal alone. DP-06 caused no churn this round (original deployer's roles weren't in remote state). | Kiro |
 | 2026-10-05 | M4, N3, H1, N6 | ✅ Pass (live) | §3.4 Queries 1/3/4/6 after re-deploy. Q1: all decision records carry OBS-001 fields, `dryRun="true"` (H1/N6). Q3: `reconcile` ≈ 1 invocation/15 min. **Q4: EMPTY — no host storage auth errors (DP-04 confirmed live)**. Q6: `pwrsched.summary` count = invocation count (N3). | Kiro |
 | 2026-10-05 | V2 | ✅ Fixed + confirmed live | Identified via §3.4 Q1 as **W6 `vmss-demo-w6`**. Root cause: `vmss` handler read the scale-set-level instance view, which carries no `PowerState/*` for Uniform VMSS → `unknown`. Fixed `src/handlers/vmss.py` to aggregate per-instance power states (`virtual_machine_scale_set_vms.list`/`get_instance_view`); 8 unit tests + SDK-surface rows added (156 passed/8 skipped, ruff clean). Re-published code; **14:00 UTC cycle shows 0 `unknown-state-skip`** (W6 now `already-converged`, `actualState=Stopped`). Remaining: observe W6 while **running** (Phase B/S1L) for the running→deallocate path. | Kiro |
+| 2026-10-05 | V2 review, V3, N4, DP-05 | 🔍 Review recorded | Review of `96fb97c` + `8eee22f`: V2 fix correct for Uniform scale sets; 164 tests pass with SDKs, strict SDK surface 8 passed, ruff clean. Opened **V3** (Flexible-mode scale sets unsupported by the per-instance read; see §6.1). N4 can use W2's `RG-Demo-MixedCase` (§3.4 note). DP-05 recommendation recorded in `demo/TASKS.md` §8. Tomorrow's dry run should log `action=start` for W7/W8 at 08:00 and W1/W2/W3/W5/W6 at 08:30 Bangkok (S1/S12; 08:15 slot empty without W12/W13). | Claude |
 
 ### 6.1 Issues found during verification
 
@@ -562,3 +566,53 @@ ruff clean.
 - [x] The resource is identified (W6 `vmss-demo-w6`) and the root cause recorded here.
 - [x] After the fix, a full dry-run cycle shows **0** `unknown-state-skip` results for in-scope resources (demo 2026-10-05, 14:00 UTC cycle: `already-converged`×7 incl. W6, `production-excluded`×1, `schedule-disabled`×1 — no unknowns). W6 now reads `actualState=Stopped` (it was manually deallocated), proving the handler reads real instance state.
 - [ ] Live check with W6 **running** (not just stopped): confirm `get_state` returns `running` and the engine submits a deallocate at the stop boundary (covered by demo scenario during Phase B / S1L; also exercised by the `running`-instance unit tests).
+
+#### V3 — `vmss` handler can't read Flexible-mode scale sets
+
+| | |
+|---|---|
+| **Severity** | Medium (High for tenants that use Flexible scale sets) |
+| **Status** | 🔴 Open — code fix needed |
+| **Found** | 2026-10-05, review of the V2 fix (`96fb97c`) |
+| **Location** | `src/handlers/vmss.py` (`get_state`) |
+| **Related** | V2, FR-004, HR-001, NFR-002 |
+
+**Description.** The V2 fix reads power state per instance through
+`virtual_machine_scale_set_vms` (`list` + `get_instance_view`). That API works for
+**Uniform** orchestration mode (the demo's W6), but Azure does not support it for
+**Flexible** mode, which is now the default for new scale sets. For a Flexible
+scale set, `get_state` would fail every cycle (`state-read-failed`) and the scale
+set would never be started or stopped.
+
+Related points:
+
+- **Double handling:** Flexible members are ordinary VM resources. If they
+  inherit a `schedule-profile` (from their resource group or subscription), the
+  `vm` handler acts on each member while the `vmss` handler acts on the scale set.
+- **API cost (Low):** for Uniform scale sets the fix makes one `list` call plus one
+  `get_instance_view` call per instance, every cycle (51 calls for a 50-instance
+  scale set). `virtual_machine_scale_set_vms.list(..., expand="instanceView")`
+  returns the same data in one call.
+
+**Recommended fix.**
+
+1. Read the scale set's `orchestration_mode` first.
+2. **Uniform:** keep the per-instance aggregation, using
+   `list(..., expand="instanceView")` instead of one call per instance.
+3. **Flexible:** either read member power states another way (for example the
+   member VMs from Resource Graph, where `properties.virtualMachineScaleSet.id`
+   equals the scale set ID), or raise `HandlerSkip("vmss-flexible-unsupported")`
+   so it is logged and not counted as a failure. Document the choice in
+   REQUIREMENTS §8.2.
+4. Decide how Flexible members are handled by the `vm` handler (schedule the scale
+   set **or** its members, not both) and record it as a handler requirement.
+
+**Acceptance criteria.**
+
+- [ ] Unit tests: Uniform scale set (running / deallocated / stopped-allocated);
+  Flexible scale set (handled or skipped with `vmss-flexible-unsupported`,
+  `failed == 0`); the single-call `expand="instanceView"` path.
+- [ ] SDK surface test covers any new client calls.
+- [ ] If a Flexible scale set is available in the demo tenant: one dry-run cycle
+  shows the expected result for it, and no `state-read-failed`.
+
