@@ -29,13 +29,13 @@ These are done by the operator, not Kiro. Tracked here for context.
 
 | Ref | Step | Buildability | Status | Notes |
 |---|---|---|---|---|
-| DM-01 | Create demo tenant + activate credit | 🔵 | ⬜ | Operator |
-| DM-02 | Confirm credit limits (subscriptions, regions, services, spending limit) | 🔵 | ⬜ | Operator — confirm the credit allows all four subscriptions (plan v0.3; Plan B removed) |
-| DM-03 | Create + rename subscriptions (§2.1) | 🔵 | 🟡 | 3 of 4 created; `sub-demo-sandbox` pending Azure quota |
-| DM-04 | Elevate access (UAA at Tenant Root), re-login | 🔵 | ⬜ | Turn off again after deploy (§9) |
-| DM-05 | Register resource providers in each subscription | 🔵 | 🟡 | Script `scripts/register-providers.sh` ran: all 12 providers Registered on the 3 existing subs (management, workload-dev, workload-prod). ⏳ Re-run for `sub-demo-sandbox` once created |
-| DM-06 | Check vCPU quota in `southeastasia` (≥10 B-series) | 🔵 | ⬜ | Operator |
-| DM-07 | Check SQL MI free-offer eligibility | 🔵 | ⬜ | Decides W14 funding |
+| DM-01 | Create demo tenant + activate credit | 🔵 | ✅ | Operator — tenant `1b0a7c64…` active; deploys succeeded against it (2026-10-05) |
+| DM-02 | Confirm credit limits (subscriptions, regions, services, spending limit) | 🔵 | ✅ | 4-subscription Plan A confirmed; 3 subs funded (sandbox pending). Note: `southeastasia` had **no VM capacity** for B-series (not a quota issue — regional vCPU limit 65, usage 0); workloads moved to `eastasia` |
+| DM-03 | Create + rename subscriptions (§2.1) | 🔵 | 🟡 | 3 of 4 created (management, workload-dev, workload-prod); `sub-demo-sandbox` still pending Azure quota |
+| DM-04 | Elevate access (UAA at Tenant Root), re-login | 🔵 | ✅ | Done — MG/role-assignment/tag operations succeeded. ⏳ Turn off again after full teardown (§9) |
+| DM-05 | Register resource providers in each subscription | 🔵 | 🟡 | All 12 providers Registered on the 3 existing subs. ⏳ Re-run for `sub-demo-sandbox` once created |
+| DM-06 | Check vCPU quota in `southeastasia` (≥10 B-series) | 🔵 | ✅ | Quota fine (65 vCPUs). But B-series had a **capacity restriction** in `southeastasia`/`eastasia`; `Standard_B2ts_v2` has capacity in `eastasia` — workloads deployed there with that size |
+| DM-07 | Check SQL MI free-offer eligibility | 🔵 | ⬜ | Decides W14 funding (W14 not yet deployed) |
 
 ---
 
@@ -44,12 +44,18 @@ These are done by the operator, not Kiro. Tracked here for context.
 | Group | Tasks | Done | Status |
 |---|---|---|---|
 | Scripts & prerequisites | DM-05, DM-40, DM-42, DM-43 | 4 / 4 (DM-05 live-partial) | 🟡 |
-| Landing zone (Terraform) | DM-10–DM-14 | 5 / 5 code; apply pending tenant | 🟡 |
-| Workloads (Terraform) | DM-20–DM-23 | 4 / 4 code; apply pending tenant | 🟡 |
-| Scheduler deployment | DM-30–DM-31 | 1 / 2 | 🟡 |
+| Landing zone (Terraform) | DM-10–DM-14 | 5 / 5 code + **applied to demo tenant** | ✅ |
+| Workloads (Terraform) | DM-20–DM-23 | 4 / 4 code + **core applied (eastasia)** | ✅ |
+| Scheduler deployment | DM-30–DM-31 | 2 / 2 — **deployed + code published, dry-run cycle verified** | ✅ |
 | Queries & evidence | DM-41, DM-44 | 1 / 2 | 🟡 |
 | Runbook | demo/README.md | 1 / 1 | ✅ |
-| **Total** | | **16 / 18** | 🟡 |
+| **Total** | | **17 / 18** | 🟡 |
+
+> **Live status (2026-10-05):** Landing zone, core workloads (W1–W9, W11 + VMSS + 2 DBs) and
+> the scheduler are all deployed. The `reconcile` timer runs every 15 min in **dry-run** and the
+> dry-run checklist passes (see VERIFICATION §6 results log). Remaining before T-603 go-live:
+> H2 alert tests (S15), M4 past-due test (S16), N4 mixed-case fixture, optional W12–W14, the
+> sandbox subscription (W10/S3/S9), and ≥1 full business day of dry-run.
 
 ---
 
@@ -64,8 +70,10 @@ All of these are code/docs, validated offline — **no subscription required**:
 - `demo/scripts/*` (DM-40, DM-42, DM-43) — bash, `bash -n` checkable
 - `demo/queries/*.kql` (DM-41) — KQL authored against the known telemetry contract
 
-Blocked until the live tenant exists (🔵): DM-11, DM-12, DM-13 apply-time behaviour,
-DM-31 deploy, and every scenario run (S1–S17) / verification (T-602, T-603).
+Blocked until the live tenant exists (🔵): ~~DM-11, DM-12, DM-13 apply-time behaviour,
+DM-31 deploy~~ — **all done 2026-10-05**. Still 🔵: W10 and scenarios needing the
+sandbox subscription (S3, S9), and the remaining live scenario runs / verification
+(S10–S18, T-603 go-live). See §8 for the fixes the live deploy required.
 
 ---
 
@@ -83,19 +91,19 @@ DM-31 deploy, and every scenario run (S1–S17) / verification (T-602, T-603).
 - **Buildability:** 🔵 Needs the subscriptions to exist (incl. `sub-demo-sandbox`)
 - **DoD:** `azurerm_management_group_subscription_association` for each sub under its MG.
   Terraform **resource** authorable now behind a variable; real IDs needed to apply.
-- **Status:** 🟡 (code ✅ authored + validated; apply 🔵 — sandbox count-gated for later)
+- **Status:** ✅ (code + **applied 2026-10-05**: management/workload-dev/workload-prod placed under their MGs; sandbox count-gated, pending its subscription)
 
 ### DM-12 — Subscription tags (§2.1)
 - **Buildability:** 🔵 Needs subscriptions; code 🟢
 - **DoD:** `environment` tags per §2.1 incl. deliberately mixed-case `Environment=Prod`
   (tests N5) and `schedule-profile=sandbox-default` on sandbox. Use `azapi`
   (`Microsoft.Resources/tags`) or `az tag update` (azurerm has no subscription-tag resource).
-- **Status:** 🟡 (code ✅ via `azapi_update_resource`, incl. mixed-case `Environment=Prod`; apply 🔵)
+- **Status:** ✅ (code + **applied 2026-10-05**: `az tag list` confirms `Environment=Prod` on the prod sub (mixed case, N5) and `environment` tags on management/dev; sandbox tag count-gated)
 
 ### DM-13 — Budgets + email alerts at USD 250/500/750
 - **Buildability:** 🔵 Needs the credit subscription(s); code 🟢
 - **DoD:** `azurerm_consumption_budget_subscription` with 3 notifications. Visible in Cost Management after apply.
-- **Status:** 🟡 (code ✅ for_each over Plan A subs, thresholds 25/50/75% → 250/500/750; apply 🔵)
+- **Status:** ✅ (code + **applied 2026-10-05**: 3 budgets created (management/dev/prod) at 250/500/750; 4th added when sandbox exists)
 
 ### DM-14 — Outputs + demo.tfvars renderer
 - **Buildability:** 🟢 fully offline
@@ -112,7 +120,7 @@ DM-31 deploy, and every scenario run (S1–S17) / verification (T-602, T-603).
 - **DoD:** W1–W11 with exact tags/placement; **mixed-case RG name `RG-Demo-MixedCase`
   preserved exactly** (S2/N4). VMs: `Standard_B1s`, no public IP, no inbound, generated SSH key.
   One VNet per subscription, no peering. `terraform validate` passes.
-- **Status:** ✅ (authored + offline-validated; W1-W11 across workloads_vms_dev/db_vmss/vms_other.tf; apply 🔵)
+- **Status:** ✅ (authored + **applied 2026-10-05**: W1–W9, W11 + VMSS W6 + PostgreSQL W7 / MySQL W8 all running; `RG-Demo-MixedCase` casing preserved. ⚠️ **Deviation from DoD:** `Standard_B1s` was capacity-restricted in `southeastasia` *and* `eastasia`; deployed with `Standard_B2ts_v2` in **`eastasia`** (both set in `demo/workloads/terraform.tfvars`). W10 sandbox still 🔵)
 
 ### DM-21 — Optional toggles (§4.2)
 - **Buildability:** 🟢 offline
@@ -143,7 +151,7 @@ DM-31 deploy, and every scenario run (S1–S17) / verification (T-602, T-603).
 ### DM-31 — Deploy scheduler in dry-run + publish code
 - **Buildability:** 🔵 Needs the tenant
 - **DoD:** VERIFICATION §3.2 checkpoints pass; `reconcile - [timerTrigger]` listed.
-- **Status:** ⬜
+- **Status:** ✅ (**deployed 2026-10-05** via `./infra/deploy.sh demo apply`; R-01 plan check passed — role assigned only at `demo-landingzones` + `demo-sandbox`; code published via `az ... config-zip` remote build; `reconcile - [timerTrigger]` registered; first dry-run cycles emitted decision + summary telemetry with `dryRun=true` and `production-excluded` on W9. Required 4 fixes to deploy — see §8. Outputs: `func-pwrsched-eorw` / `appcs-pwrsched-eorw` / `appi-pwrsched` in `rg-pwrsched-southeastasia`.)
 
 ---
 
@@ -260,6 +268,38 @@ with `sandbox_subscription_id` set.
 
 ---
 
+## 8. Fixes made during the live deploy (DM-31, 2026-10-05)
+
+Four issues surfaced only when deploying to the live demo tenant (they were not
+visible to offline `terraform validate` / unit tests). The first three are
+**product-code fixes in `infra/`** that affect **every** tenant's deployment, not
+just the demo — pushed to `main` in commit `adfdb71`. The fourth is a runtime
+app-setting workaround not yet in code. Also recorded in VERIFICATION §6 results
+log (2026-10-05). IDs use the **DP-** prefix (deploy fix) to distinguish them
+from demo-scaffold review findings (DR-) and live verification issues (V-).
+
+**Status legend:** 🔴 Open · ✅ Fixed (in code) · 🩹 Runtime workaround (not in code)
+
+| ID | Severity | Finding | Fix | Status |
+|---|---|---|---|---|
+| DP-01 | High | **Storage data-plane 403 (`KeyBasedAuthenticationNotPermitted`)** blocked `terraform plan`/`apply`. The scheduler storage account disables shared keys (SEC-005), but the azurerm provider used shared-key auth to read blob/queue/table properties. Also, the deployer user needs data-plane roles to run Terraform against it. | `infra/scheduler/providers.tf`: add `storage_use_azuread = true`. Operator also needs Storage Blob Data Contributor on the state SA and Blob Data Owner + Queue/Table Data Contributor on the runtime SA. | ✅ Fixed (`adfdb71`) |
+| DP-02 | High | **Function App create fails (BadRequest 51021):** `FUNCTIONS_WORKER_RUNTIME` is invalid as an app setting on Flex Consumption sites. | `infra/modules/function_app/main.tf`: remove the `FUNCTIONS_WORKER_RUNTIME` app setting; the runtime is set via `runtime_name`/`runtime_version`. | ✅ Fixed (`adfdb71`) |
+| DP-03 | High | **Cycle-health alert (H2) fails to create:** `Query could not be parsed at ')'`. The measure column was named `cycles`, a **reserved KQL keyword**, so `summarize cycles = count()` was rejected. (The 3 sibling alerts used non-reserved names and deployed fine.) | `infra/modules/monitoring/main.tf`: rename `cycles` → `cycleCount` (column + `metric_measure_column`). | ✅ Fixed (`adfdb71`) |
+| DP-04 | High | **Function host drains with storage auth 403s after deploy.** The platform/provider auto-injected a key-based `AzureWebJobsStorage` connection string (empty key, shared keys disabled) that **overrode** the module's identity-based `AzureWebJobsStorage__*` settings (M4), so the host couldn't acquire the timer lease and reported unhealthy. | Removed the conflicting `AzureWebJobsStorage` app setting via `az` (identity-based `__*` settings remain; Terraform does not re-add it). **Not yet a code fix** — the module could be hardened to prevent the injection. | 🩹 Runtime workaround |
+
+> **Benign note (not a defect):** `terraform plan` for the scheduler always shows
+> "1 to change" on the Function App because Azure echoes
+> `APPLICATIONINSIGHTS_CONNECTION_STRING` (set in `site_config`) into
+> `app_settings`. Harmless; plans won't show "No changes".
+
+> **Follow-up:** DP-01–DP-03 were committed straight to `main` during the deploy;
+> they should go through the normal code review. DP-04 should be converted to a
+> module-level fix so a future `terraform apply` can't reintroduce the conflict.
+
+
+
+---
+
 ## Progress log
 
 | Date | Task(s) | Change | Notes |
@@ -276,3 +316,9 @@ with `sandbox_subscription_id` set.
 | 2026-10-04 | DR-01–DR-11 | Review findings fixed | DR-01 (deploy/destroy via `./infra/deploy.sh demo`; added `infra/tenants/demo.{tfvars,backend.hcl}.example`; renderer → `infra/tenants/demo.tfvars`; teardown.sh re-inits demo backend + prints it), DR-02 (SQL MI `LicenseIncluded`), DR-03 (Plan B removed; DM-22 ⚪), DR-04 (`dryRun=="false"` in Q-G/Q-A), DR-05 (appgw NSG), DR-06 (RG profile tag only on W2), DR-08 (dead var removed), DR-09 (Q-C → Q-C1/Q-C2), DR-11 (tag-cleanup step). DR-07 adjusted (MySQL `public_network_access_enabled` is computed in azurerm 4.x — accepted deviation, documented). DR-10 🔍 (README verify + NAT fallback). Validated: `terraform validate` **Success!** (workloads + landing-zone), all 11 scripts `bash -n` clean, evidence splitter still 7, 8 Q-* files. |
 | 2026-10-04 | DR-01–DR-14 | Round 2 review of `66bd678` + `4f1f6b9` recorded (§7) | Confirmed fixed: DR-01–DR-06, DR-08, DR-09, DR-11 (DR-10 still verify-live). DR-07 reopened: pinned azurerm 4.81.0 supports `public_network_access = "Disabled"` on MySQL Flexible. New: DR-12 (Medium, `deploy.sh destroy` fails because of `-input=false` without `-auto-approve`), DR-13 (Low, stale `demo/scheduler/demo.tfvars` references), DR-14 (Low, `collect-evidence.sh` reads outputs from the last-initialised backend). Product tests 156 passed, ruff clean; Terraform not validated in the review environment. |
 | 2026-10-04 | DR-07, DR-12, DR-13, DR-14, DR-03 | Round-2 findings fixed | DR-07 (MySQL W8 `public_network_access = "Disabled"` — verified settable on pinned azurerm 4.81.0), DR-12 (product `infra/deploy.sh` destroy branch drops `-input=false` so the interactive approval prompt works), DR-13 (DEMO_TENANT_PLAN §2.3 + DM-14 and TASKS DM-14 now reference `infra/tenants/demo.tfvars` + `./infra/deploy.sh demo`), DR-14 (`collect-evidence.sh` resolves outputs via `./infra/deploy.sh demo output`, re-initialising the demo backend; removed unused `SCHED_DIR`), DR-03 leftover (DM-02 note no longer mentions Plan B). Validated: `terraform validate` **Success!** (workloads); `bash -n` clean on `infra/deploy.sh` + `collect-evidence.sh`; DR-14 output parsing simulated OK. |
+| 2026-10-05 | DM-01, DM-02, DM-04, DM-10–DM-13 | Landing zone **applied** to demo tenant | Recovered a partial apply by importing 10 MGs + 3 subscription associations into state; converged to **No changes**. Prereqs DM-01/02/04 confirmed satisfied (deploys succeeded). `Environment=Prod` tag on the prod sub verified via `az tag list`. 3 budgets created. Sandbox resources count-gated (absent). |
+| 2026-10-05 | DM-06, DM-20, DM-21 | Workloads **applied** (core) | W1–W9, W11 + VMSS W6 + PostgreSQL W7 / MySQL W8 running; `RG-Demo-MixedCase` casing preserved. **Deviation:** `Standard_B1s` capacity-restricted in `southeastasia` *and* `eastasia` (quota was fine, 65 vCPUs); deployed `Standard_B2ts_v2` in **`eastasia`** (updated `demo/workloads/terraform.tfvars`). Also worked around an azurerm "inconsistent result after apply" bug via targeted `terraform import`. W12–W14 off; W10 sandbox 🔵. |
+| 2026-10-05 | DM-31 | Scheduler **deployed** + code published; dry-run verified | `./infra/deploy.sh demo apply` → scheduler in `rg-pwrsched-southeastasia` (`func-pwrsched-eorw`, `appcs-pwrsched-eorw`, `appi-pwrsched`, custom role only at `demo-landingzones`+`demo-sandbox`). Code published via `az ... config-zip` (remote build; `func` core tools not installed locally). `reconcile - [timerTrigger]` registered; timer fires every 15 min. Required 4 fixes — see §8 (DP-01–DP-04). |
+| 2026-10-05 | DP-01, DP-02, DP-03 | Product-code deploy fixes (pushed to `main` `adfdb71`) | `storage_use_azuread=true` (DP-01), removed `FUNCTIONS_WORKER_RUNTIME` (DP-02), renamed reserved KQL keyword `cycles`→`cycleCount` in cycle-health alert (DP-03). `terraform fmt -check` + `validate` pass. Also committed `infra/scheduler/.terraform.lock.hcl`. These affect any tenant's deploy — flagged for normal code review. |
+| 2026-10-05 | DP-04 | Runtime workaround (not in code) | Removed the platform-injected key-based `AzureWebJobsStorage` connection string that overrode the identity-based `__*` settings and drained the host. Terraform does not re-add it; module hardening is a follow-up. |
+| 2026-10-05 | T-602 verification | Dry-run checks recorded in VERIFICATION §6 | ✅ C1, H1, N3, N6, §3.3 dry-run checklist; 🟡 M4 (timer+no-auth-errors pass, past-due test pending). Pending: C3 (no SQL MI), H2 (alert tests), N4 (mixed-case fixture), V1 (no AKS). VERIFICATION §0 tracker + results log updated. |
