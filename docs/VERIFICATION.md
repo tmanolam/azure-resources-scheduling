@@ -34,8 +34,8 @@ items below.
 |---|---|---|---|
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ✅ Done for the **demo tenant** (`infra/tenants/demo.tfvars`); each real tenant still needs its own |
-| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant 2026-10-05; dry-run checklist §3.3 passing; C3/H2/N4 still to run, then ≥1 business day |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 complete, all live checks below, and V1 fixed) |
+| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed + re-applied to demo tenant 2026-10-05; dry-run checklist §3.3 passing; §3.4 Q1/3/4/6 pass; V2 fixed & confirmed live. Still to run: C3 (no SQL MI), H2 (alerts), N4 (mixed-case fixture), M4 past-due, then ≥1 business day |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, all live checks below, V1 fixed (live S18), and the DP-05 §4-checkpoint blocker resolved (residual `AzureWebJobsStorage` plan diff; see `demo/TASKS.md` §8). V2 is fixed |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
 
