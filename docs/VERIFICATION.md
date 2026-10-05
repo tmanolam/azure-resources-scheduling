@@ -183,6 +183,23 @@ Functions in func-pwrsched-<suffix>:
     reconcile - [timerTrigger]
 ```
 
+**Checkpoint — host storage settings (DP-04):** after every `apply` **and** every
+code publish, confirm the host uses the identity-based storage connection:
+
+```bash
+az functionapp config appsettings list -g "$RG" -n "$FUNC_APP" \
+  --query "[?starts_with(name, 'AzureWebJobsStorage')].{name:name, value:value}" -o table
+```
+
+Pass: `AzureWebJobsStorage__accountName`, `AzureWebJobsStorage__credential`
+(`managedidentity`) and `AzureWebJobsStorage__clientId` are set, and the plain
+`AzureWebJobsStorage` is **absent or empty**. If it holds a connection string,
+the host will fail with storage 403s: remove it and re-apply, then check §3.4
+Query 4.
+
+**Checkpoint — no drift (DP-05):** run `plan` again right after `apply`; it
+must show **No changes**. Run it as the same identity that applied (DP-06).
+
 ### 3.3 Dry-run checklist (one cycle ≈ 15 min)
 
 Query Application Insights (README Step 6 shows the full KQL):
@@ -417,6 +434,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | V2 | 🔍 Issue opened | Review of the T-602 results: one in-scope resource reads as `unknown-state-skip` every cycle; see §6.1. | Claude |
 | 2026-10-05 | DP-01, DP-04, DP-05 | 🔴 Follow-ups recorded | Deploy-fix follow-ups recorded in `demo/TASKS.md` §8: DP-01 (deployer data roles not granted or documented), DP-04 (needs a code fix and a post-deploy check), DP-05 (duplicate `APPLICATIONINSIGHTS_CONNECTION_STRING` makes every plan show a change, which breaks the §4 go-live checkpoint). | Claude |
 | 2026-10-05 | DP-01, DP-04, DP-05 | ✅ Fixed in code | DP-04: `infra/modules/function_app/main.tf` pins `AzureWebJobsStorage = ""` (azurerm #29149) so the key-based re-injection can't override the identity-based `__*` settings (replaces the `az` workaround). DP-05: removed the duplicate `APPLICATIONINSIGHTS_CONNECTION_STRING` from `app_settings` (kept in `site_config`) — fixes the perpetual plan drift so the §4 checkpoint can pass. DP-01 follow-up: the `function_app` module now grants the deployer Blob Data Owner + Queue/Table Data Contributor on the runtime SA (`deployer_object_id` wired from the root; deployment container `depends_on` the deployer blob role); README note + Troubleshooting row updated. Validated: `terraform fmt -check -recursive infra/` exit 0, `terraform validate` **Success!**. Live re-plan confirmation (§4 shows only `pwrsched:dryRun`) still pending a deployed tenant. | Kiro |
+| 2026-10-05 | DP-04, DP-05, DP-06 | 🔍 Review recorded | Review of `edf3495`: fixes are correct in code but unverified live. Added the host-storage and no-drift checkpoints to §3.2. New DP-06 (deployer role assignments follow the signed-in identity). Before re-applying, delete or import the manually granted deployer storage roles to avoid `409 RoleAssignmentExists` (see `demo/TASKS.md` §8). | Claude |
 
 ### 6.1 Issues found during verification
 
