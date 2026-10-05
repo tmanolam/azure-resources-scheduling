@@ -149,18 +149,84 @@ def test_normalise_succeeded_is_unknown_not_running():
 
 # --- VMSS --------------------------------------------------------------------
 
-def test_vmss_start_and_state():
-    calls = []
-    ops = _ns(
-        get_instance_view=lambda rg, n: _ns(statuses=[_ns(code="PowerState/running")]),
+def _vmss_client(instance_power_states, calls):
+    """Fake ComputeManagementClient whose scale-set VMs report the given power
+    states. ``instance_power_states`` is a list; each entry becomes one instance
+    with a ``PowerState/<state>`` status. ``None`` means an instance with no
+    power-state status (e.g. provisioning only)."""
+    instances = [_ns(instance_id=str(i)) for i in range(len(instance_power_states))]
+
+    def _list(rg, n):
+        return list(instances)
+
+    def _get_iv(rg, n, instance_id):
+        state = instance_power_states[int(instance_id)]
+        statuses = [_ns(code="ProvisioningState/succeeded")]
+        if state is not None:
+            statuses.append(_ns(code=f"PowerState/{state}"))
+        return _ns(statuses=statuses)
+
+    vm_ops = _ns(list=_list, get_instance_view=_get_iv)
+    ss_ops = _ns(
         begin_start=lambda rg, n: calls.append(("start", n)),
         begin_deallocate=lambda rg, n: calls.append(("deallocate", n)),
     )
-    h = VmssHandler(lambda s: _ns(virtual_machine_scale_sets=ops))
-    rec = _rec(_rid("Microsoft.Compute", "virtualMachineScaleSets", "ss1"), "vmss", "Microsoft.Compute/virtualMachineScaleSets")
-    assert h.get_state(rec) == "running"
+    return _ns(virtual_machine_scale_set_vms=vm_ops, virtual_machine_scale_sets=ss_ops)
+
+
+def _vmss_rec():
+    return _rec(_rid("Microsoft.Compute", "virtualMachineScaleSets", "ss1"),
+                "vmss", "Microsoft.Compute/virtualMachineScaleSets")
+
+
+def test_vmss_start_and_deallocate_submit():
+    calls = []
+    h = VmssHandler(lambda s: _vmss_client(["running"], calls))
+    rec = _vmss_rec()
+    h.start(rec)
     h.stop(rec)
-    assert calls == [("deallocate", "ss1")]
+    assert calls == [("start", "ss1"), ("deallocate", "ss1")]
+
+
+def test_vmss_v2_running_from_instance_view_not_scale_set():
+    # V2 regression: a running Uniform VMSS must read "running" from the
+    # per-instance view (the scale-set-level view carries no PowerState).
+    h = VmssHandler(lambda s: _vmss_client(["running"], []))
+    assert h.get_state(_vmss_rec()) == "running"
+
+
+def test_vmss_any_running_instance_is_running():
+    h = VmssHandler(lambda s: _vmss_client(["deallocated", "running"], []))
+    assert h.get_state(_vmss_rec()) == "running"
+
+
+def test_vmss_all_deallocated_is_deallocated():
+    h = VmssHandler(lambda s: _vmss_client(["deallocated", "deallocated"], []))
+    assert h.get_state(_vmss_rec()) == "deallocated"
+
+
+def test_vmss_powered_off_but_allocated_is_stopped_allocated():
+    # Billed-but-off instances must be deallocated (H4).
+    h = VmssHandler(lambda s: _vmss_client(["stopped", "deallocated"], []))
+    assert h.get_state(_vmss_rec()) == "stopped-allocated"
+    assert _normalise_actual(h.get_state(_vmss_rec())) is ActualState.STOPPED_ALLOCATED
+
+
+def test_vmss_no_instances_is_deallocated():
+    # Capacity 0 => nothing billed => converged to stopped, not unknown.
+    h = VmssHandler(lambda s: _vmss_client([], []))
+    assert h.get_state(_vmss_rec()) == "deallocated"
+
+
+def test_vmss_transitional_when_none_running():
+    h = VmssHandler(lambda s: _vmss_client(["starting", "deallocated"], []))
+    assert h.get_state(_vmss_rec()) == "starting"
+    assert _normalise_actual(h.get_state(_vmss_rec())) is ActualState.TRANSITIONAL
+
+
+def test_vmss_running_wins_over_transitional():
+    h = VmssHandler(lambda s: _vmss_client(["starting", "running"], []))
+    assert h.get_state(_vmss_rec()) == "running"
 
 
 # --- AKS (HR-002) ------------------------------------------------------------

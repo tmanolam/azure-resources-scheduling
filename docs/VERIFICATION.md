@@ -37,7 +37,7 @@ items below.
 | T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant 2026-10-05; dry-run checklist §3.3 passing; C3/H2/N4 still to run, then ≥1 business day |
 | T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 complete, all live checks below, and V1 fixed) |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
-| V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | 🔍 Under investigation — identify the resource; blocks T-603 if it is a defect |
+| V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
 
 ### Live checks carried over from the code review
 
@@ -435,6 +435,10 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | DP-01, DP-04, DP-05 | 🔴 Follow-ups recorded | Deploy-fix follow-ups recorded in `demo/TASKS.md` §8: DP-01 (deployer data roles not granted or documented), DP-04 (needs a code fix and a post-deploy check), DP-05 (duplicate `APPLICATIONINSIGHTS_CONNECTION_STRING` makes every plan show a change, which breaks the §4 go-live checkpoint). | Claude |
 | 2026-10-05 | DP-01, DP-04, DP-05 | ✅ Fixed in code | DP-04: `infra/modules/function_app/main.tf` pins `AzureWebJobsStorage = ""` (azurerm #29149) so the key-based re-injection can't override the identity-based `__*` settings (replaces the `az` workaround). DP-05: removed the duplicate `APPLICATIONINSIGHTS_CONNECTION_STRING` from `app_settings` (kept in `site_config`) — fixes the perpetual plan drift so the §4 checkpoint can pass. DP-01 follow-up: the `function_app` module now grants the deployer Blob Data Owner + Queue/Table Data Contributor on the runtime SA (`deployer_object_id` wired from the root; deployment container `depends_on` the deployer blob role); README note + Troubleshooting row updated. Validated: `terraform fmt -check -recursive infra/` exit 0, `terraform validate` **Success!**. Live re-plan confirmation (§4 shows only `pwrsched:dryRun`) still pending a deployed tenant. | Kiro |
 | 2026-10-05 | DP-04, DP-05, DP-06 | 🔍 Review recorded | Review of `edf3495`: fixes are correct in code but unverified live. Added the host-storage and no-drift checkpoints to §3.2. New DP-06 (deployer role assignments follow the signed-in identity). Before re-applying, delete or import the manually granted deployer storage roles to avoid `409 RoleAssignmentExists` (see `demo/TASKS.md` §8). | Claude |
+| 2026-10-05 | Re-deploy, DP-01, DP-04 | ✅ Pass (live) | Re-applied from a fresh laptop (scheduler state is **remote** in `demosatfstate`; `init -reconfigure` pulled it — the other laptop only held the demo landing-zone/workloads *local* state, not needed here). **No manual deployer roles existed to delete:** the 3 roles on `stpwrschedeorw` belong to the managed identity `id-pwrsched` (Terraform-managed, in state), and the signed-in deployer is a *different* identity than the original with only inherited Owner/UAA — so no `409` trap applied to it. `apply`: **3 added** (deployer Blob/Queue/Table roles for the new deployer, DP-01) **+ 1 changed** (func app `AzureWebJobsStorage`→null, DP-04) **+ 0 destroyed**. **DP-04 host-storage checkpoint PASS:** `__accountName=stpwrschedeorw`, `__credential=managedidentity`, `__clientId` set; bare `AzureWebJobsStorage` empty (no key-based re-injection). | Kiro |
+| 2026-10-05 | DP-05, DP-06 | 🟡 Partial / open | **No-drift checkpoint NOT clean:** post-apply `plan` shows `0 add / 1 change / 0 destroy` — a *perpetual, benign* `app_settings.AzureWebJobsStorage → null` diff (azurerm #29149: platform re-injects an empty bare value; Terraform keeps wanting it null). The `hidden-link` App Insights tag diff has settled. This recurring diff means the strict §4 go-live checkpoint ("only change is `pwrsched:dryRun`") **cannot pass as-is** — DP-05 is a known upstream issue, not resolved by the duplicate-conn-string removal alone. DP-06 caused no churn this round (original deployer's roles weren't in remote state). | Kiro |
+| 2026-10-05 | M4, N3, H1, N6 | ✅ Pass (live) | §3.4 Queries 1/3/4/6 after re-deploy. Q1: all decision records carry OBS-001 fields, `dryRun="true"` (H1/N6). Q3: `reconcile` ≈ 1 invocation/15 min. **Q4: EMPTY — no host storage auth errors (DP-04 confirmed live)**. Q6: `pwrsched.summary` count = invocation count (N3). | Kiro |
+| 2026-10-05 | V2 | ✅ Fixed + confirmed live | Identified via §3.4 Q1 as **W6 `vmss-demo-w6`**. Root cause: `vmss` handler read the scale-set-level instance view, which carries no `PowerState/*` for Uniform VMSS → `unknown`. Fixed `src/handlers/vmss.py` to aggregate per-instance power states (`virtual_machine_scale_set_vms.list`/`get_instance_view`); 8 unit tests + SDK-surface rows added (156 passed/8 skipped, ruff clean). Re-published code; **14:00 UTC cycle shows 0 `unknown-state-skip`** (W6 now `already-converged`, `actualState=Stopped`). Remaining: observe W6 while **running** (Phase B/S1L) for the running→deallocate path. | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -512,43 +516,49 @@ not put a `schedule-profile` tag on a subscription that contains AKS clusters.
 
 | | |
 |---|---|
-| **Severity** | High (if confirmed as a defect) |
-| **Status** | 🔍 Under investigation |
+| **Severity** | High |
+| **Status** | ✅ Fixed in code and **confirmed live** (2026-10-05) — demo cycle shows 0 `unknown-state-skip` |
 | **Found** | 2026-10-05, demo dry run (T-602) |
-| **Location** | To be determined: Resource Graph power-state projection (`src/engine/discovery.py`) or the handler's `get_state` fallback (`src/handlers/`) |
-| **Related** | FR-004, FR-033, M1, N7 |
+| **Location** | `src/handlers/vmss.py` (`get_state`) |
+| **Related** | FR-004, FR-033, M1, N7, H4 |
 
-**Description.** The §3.3 breakdown over the first two cycles shows
+**Description.** The §3.3 breakdown over the first two cycles showed
 `already-converged`×12, `schedule-disabled`×2 (W4), `production-excluded`×2 (W9)
 and `unknown-state-skip`×2 — 9 resources per cycle, so **exactly one in-scope
-resource reads as Unknown every cycle**. A resource whose state is Unknown is
+resource read as Unknown every cycle**. A resource whose state is Unknown is
 never started or stopped, so in live mode it would silently stay running.
 
-The candidates are W1, W2, W3, W5, W6 (VM scale set), W7 (PostgreSQL) and W8
-(MySQL). W6 is the most likely: scale sets have no power state in Resource Graph,
-so their state comes from the `get_state` fallback (`get_instance_view`); a
-failure or unexpected status there normalises to Unknown.
+**Resource identified:** **W6, `vmss-demo-w6`** (`Microsoft.Compute/virtualMachineScaleSets`,
+`rg-demo-vmss`), confirmed via §3.4 Query 1 — the only `unknown-state-skip` row,
+`actualState = Unknown` every cycle.
 
-**Next steps.**
+**Root cause (defect).** The `vmss` handler read the **scale-set-level** instance
+view (`virtual_machine_scale_sets.get_instance_view`). For a **Uniform**-mode
+scale set that view carries **no `PowerState/*` status** — only
+`ProvisioningState/succeeded` — so `get_state` fell through to `"unknown"`, which
+the engine logs as `unknown-state-skip`. Verified against Azure: the scale-set
+instance view returned only `ProvisioningState/succeeded`, while the individual
+instance (`instance 0`) reported `PowerState/running`. Power state lives on the
+**instances**, not the scale-set resource. (Resource Graph also has no power
+state for scale sets — M1/N7 — which is why discovery hits the `get_state`
+fallback in the first place.)
 
-1. Identify the resource:
-   ```kusto
-   traces
-   | where timestamp > ago(1h)
-   | where customDimensions["pwrsched.event"] == "pwrsched.decision"
-   | where tostring(customDimensions["pwrsched.result"]) == "unknown-state-skip"
-   | project timestamp, resourceId = tostring(customDimensions["pwrsched.resourceId"]),
-             type = tostring(customDimensions["pwrsched.type"]),
-             actual = tostring(customDimensions["pwrsched.actualState"]),
-             error = tostring(customDimensions["pwrsched.error"])
-   ```
-2. Compare with what Azure reports for that resource (for a scale set:
-   `az vmss get-instance-view -g <rg> -n <name> --query statuses`; for a database:
-   `az postgres flexible-server show … --query state` / `az mysql flexible-server show … --query state`).
-3. If it is a defect, fix the state mapping, add a unit test with the real status
-   values, and re-run the check in dry run.
+**Fix.** `src/handlers/vmss.py` `get_state` now aggregates the per-instance power
+states via `virtual_machine_scale_set_vms.list` + `.get_instance_view`:
+
+- any instance `running` → `running` (a running VMSS is stopped);
+- no running instance, any transitional (`starting`/`stopping`/`deallocating`) → that state (FR-033 skip & retry);
+- all instances off and billed (`stopped`) → `stopped-allocated` → deallocate (H4);
+- all `deallocated`, or capacity 0 (no instances) → `deallocated` (converged).
+
+Unit tests added in `tests/test_handlers.py` (`test_vmss_*`, 8 cases incl. the V2
+regression) and the SDK-surface matrix (`tests/test_sdk_surface.py`) now asserts
+`virtual_machine_scale_set_vms.list` / `.get_instance_view`. Suite: **156 passed,
+8 skipped** (the SDK-surface checks run in the strict `sdk-surface` CI job);
+ruff clean.
 
 **Acceptance criteria.**
 
-- [ ] The resource is identified and the root cause recorded here.
-- [ ] After any fix, a full dry-run cycle shows **0** `unknown-state-skip` results for in-scope resources.
+- [x] The resource is identified (W6 `vmss-demo-w6`) and the root cause recorded here.
+- [x] After the fix, a full dry-run cycle shows **0** `unknown-state-skip` results for in-scope resources (demo 2026-10-05, 14:00 UTC cycle: `already-converged`×7 incl. W6, `production-excluded`×1, `schedule-disabled`×1 — no unknowns). W6 now reads `actualState=Stopped` (it was manually deallocated), proving the handler reads real instance state.
+- [ ] Live check with W6 **running** (not just stopped): confirm `get_state` returns `running` and the engine submits a deallocate at the stop boundary (covered by demo scenario during Phase B / S1L; also exercised by the `running`-instance unit tests).
