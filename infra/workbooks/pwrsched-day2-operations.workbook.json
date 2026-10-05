@@ -59,7 +59,7 @@
       "name": "start-stop-actions",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend action = tostring(customDimensions[\"pwrsched.action\"])\n| where action in (\"start\", \"stop\")\n| project ['Time (Bangkok)'] = datetime_utc_to_local(timestamp, \"Asia/Bangkok\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Type     = tostring(customDimensions[\"pwrsched.type\"]),\n          Action   = action,\n          Result   = tostring(customDimensions[\"pwrsched.result\"]),\n          ['Dry run'] = tostring(customDimensions[\"pwrsched.dryRun\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])\n| order by ['Time (Bangkok)'] desc",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend action = tostring(customDimensions[\"pwrsched.action\"])\n| where action in (\"start\", \"stop\")\n| order by timestamp desc\n// Bangkok time as text, so the workbook grid doesn't convert it again to the viewer's time zone.\n| project ['Time (Bangkok)'] = format_datetime(datetime_utc_to_local(timestamp, \"Asia/Bangkok\"), \"yyyy-MM-dd HH:mm:ss\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Type     = tostring(customDimensions[\"pwrsched.type\"]),\n          Action   = action,\n          Result   = tostring(customDimensions[\"pwrsched.result\"]),\n          ['Dry run'] = tostring(customDimensions[\"pwrsched.dryRun\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])",
         "size": 0,
         "title": "Start / stop actions",
         "noDataMessage": "No start or stop decisions in this time range.",
@@ -81,7 +81,7 @@
       "name": "failed-or-skipped",
       "content": {
         "version": "KqlItem/1.0",
-        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend result = tostring(customDimensions[\"pwrsched.result\"])\n| where result == \"failed\" or result startswith \"skipped\"\n| project ['Time (Bangkok)'] = datetime_utc_to_local(timestamp, \"Asia/Bangkok\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Result   = result,\n          Error    = tostring(customDimensions[\"pwrsched.error\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])\n| order by ['Time (Bangkok)'] desc",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend result = tostring(customDimensions[\"pwrsched.result\"])\n| where result == \"failed\" or result startswith \"skipped\"\n| order by timestamp desc\n// Bangkok time as text, so the workbook grid doesn't convert it again to the viewer's time zone.\n| project ['Time (Bangkok)'] = format_datetime(datetime_utc_to_local(timestamp, \"Asia/Bangkok\"), \"yyyy-MM-dd HH:mm:ss\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Result   = result,\n          Error    = tostring(customDimensions[\"pwrsched.error\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])",
         "size": 0,
         "title": "Failed or skipped",
         "noDataMessage": "No failed or skipped decisions in this time range.",
