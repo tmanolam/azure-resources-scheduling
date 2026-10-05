@@ -1,0 +1,103 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "intro",
+      "content": {
+        "json": "## Power Scheduler — day-2 operations\nStart/stop decisions made by the scheduler, from Application Insights. Times are shown in Bangkok time (UTC+7). Open this workbook from the scheduler's Application Insights resource."
+      }
+    },
+    {
+      "type": 9,
+      "name": "parameters",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "parameters": [
+          {
+            "id": "a6f0c1d2-3b4e-4f5a-8c9d-0e1f2a3b4c5d",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "allowCustom": true,
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 172800000
+                },
+                {
+                  "durationMs": 604800000
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "start-stop-actions",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend action = tostring(customDimensions[\"pwrsched.action\"])\n| where action in (\"start\", \"stop\")\n| project ['Time (Bangkok)'] = datetime_utc_to_local(timestamp, \"Asia/Bangkok\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Type     = tostring(customDimensions[\"pwrsched.type\"]),\n          Action   = action,\n          Result   = tostring(customDimensions[\"pwrsched.result\"]),\n          ['Dry run'] = tostring(customDimensions[\"pwrsched.dryRun\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])\n| order by ['Time (Bangkok)'] desc",
+        "size": 0,
+        "title": "Start / stop actions",
+        "noDataMessage": "No start or stop decisions in this time range.",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 3,
+      "name": "failed-or-skipped",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend result = tostring(customDimensions[\"pwrsched.result\"])\n| where result == \"failed\" or result startswith \"skipped\"\n| project ['Time (Bangkok)'] = datetime_utc_to_local(timestamp, \"Asia/Bangkok\"),\n          Resource = tostring(split(tostring(customDimensions[\"pwrsched.resourceId\"]), \"/\")[-1]),\n          Result   = result,\n          Error    = tostring(customDimensions[\"pwrsched.error\"]),\n          ResourceId = tostring(customDimensions[\"pwrsched.resourceId\"])\n| order by ['Time (Bangkok)'] desc",
+        "size": 0,
+        "title": "Failed or skipped",
+        "noDataMessage": "No failed or skipped decisions in this time range.",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "ResourceId",
+              "formatter": 5
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
