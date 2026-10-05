@@ -21,4 +21,10 @@ terraform {
 provider "azurerm" {
   subscription_id = var.subscription_id
   features {}
+
+  # The scheduler storage account disables shared-key access (SEC-005). The
+  # provider must therefore use Entra ID (AAD) for storage data-plane
+  # operations (reading blob/queue/table properties); otherwise refresh/apply
+  # fails with 403 KeyBasedAuthenticationNotPermitted.
+  storage_use_azuread = true
 }

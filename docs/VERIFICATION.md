@@ -4,7 +4,7 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-VERIFY-001 |
 | Related | [REQUIREMENTS.md](REQUIREMENTS.md), [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
-| Last updated | 2026-10-04 |
+| Last updated | 2026-10-05 |
 | Scope | How to verify the scheduler — static checks (T-601), live dry-run (T-602), go-live (T-603) |
 
 This runbook is the repeatable procedure for verifying the scheduler and is the
@@ -33,10 +33,10 @@ items below.
 | ID | Item | Where | Status |
 |---|---|---|---|
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
-| OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ⛔ Blocks T-602 |
-| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | ⬜ Not started |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602, all live checks below, and V1 fixed) |
-| V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18) |
+| OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ✅ Done for the **demo tenant** (`infra/tenants/demo.tfvars`); each real tenant still needs its own |
+| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant 2026-10-05; dry-run checklist §3.3 passing; C3/H2/N4 still to run, then ≥1 business day |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started (needs T-602 complete, all live checks below, and V1 fixed) |
+| V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 
 ### Live checks carried over from the code review
 
@@ -46,14 +46,14 @@ must pass before T-603. Background on each ID is in
 
 | ID | Live check | Where | Status |
 |---|---|---|---|
-| C1 | Resources in prod subscriptions logged as `production-excluded`, never acted on | [§3.3](#33-dry-run-checklist-one-cycle--15-min) | 🔍 Pending |
-| C3 | SQL MI `actualState` never `Unknown` | [§3.4](#34-live-verification-of-review-findings), Query 2 | 🔍 Pending |
-| H1 | Decision records carry all OBS-001 fields | §3.4, Query 1 | 🔍 Pending |
-| H2 | Cycle-health and cycle-exceptions alerts fire | [§5](#5-alert-verification-obs-003004005) | 🔍 Pending |
-| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | 🔍 Pending |
-| N3 | Summary count matches invocation count | §3.4, Queries 3 and 6 | 🔍 Pending |
-| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending |
-| N6 | `dryRun` stored as `true` | §3.4, Query 1 | 🔍 Pending |
+| C1 | Resources in prod subscriptions logged as `production-excluded`, never acted on | [§3.3](#33-dry-run-checklist-one-cycle--15-min) | ✅ Pass (demo 2026-10-05: W9 `production-excluded` every cycle) |
+| C3 | SQL MI `actualState` never `Unknown` | [§3.4](#34-live-verification-of-review-findings), Query 2 | ⬜ Not tested yet — no SQL MI in scope (W14 not deployed; §3.4 permits "not tested") |
+| H1 | Decision records carry all OBS-001 fields | §3.4, Query 1 | ✅ Pass (demo 2026-10-05: 0 decisions with empty required fields) |
+| H2 | Cycle-health and cycle-exceptions alerts fire | [§5](#5-alert-verification-obs-003004005) | 🔍 Pending — alert-firing tests (S15) not run yet |
+| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | 🟡 Partial — timer fires 1/15 min, 0 storage auth errors (Q3/Q4 pass); past-due test (Q5) not run yet |
+| N3 | Summary count matches invocation count | §3.4, Queries 3 and 6 | ✅ Pass (demo 2026-10-05: 1 summary = 1 invocation per 15m bin) |
+| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending — dedicated `RG-PwrSched-CaseTest` fixture not created (W2 `RG-Demo-MixedCase` exists but isn't the N4 query target) |
+| N6 | `dryRun` stored as `true` | §3.4, Query 1 | ✅ Pass (demo 2026-10-05: all decisions `dryRun = true`, lowercase) |
 
 ---
 
@@ -392,6 +392,15 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-04 | T-601 | ✅ Pass | Re-run locally at `1eb0498`: 143 passed with pinned SDKs (136 passed, 7 skipped without), strict SDK surface 7 passed, ruff clean. Terraform fmt/validate per the CI job. | Claude |
 | 2026-10-04 | V1 | 🔴 Issue opened | Design gap found during review of AKS start/stop behaviour; see §6.1. Not yet reproduced live (planned as demo scenario S18). | Claude |
 | 2026-10-04 | V1 | 🔍 Fixed in code | discovery projects RG `managedBy` (`rgManagedBy`) and populates `ResourceRecord.resource_group_managed_by`; selection excludes `vm`/`vmss` with reason `aks-managed-node-pool` (an `aks-managed-*` tag key or RG `managedBy` → `managedClusters`, both case-insensitive) or `managed-resource-group` (other non-empty `managedBy`), before opt-in so it is logged; HR-007 added to REQUIREMENTS §8.2. Tests: 13 new (9 selection + 4 discovery). Suite **149 passed / 7 skipped**, ruff clean. Live criterion remains for demo scenario S18. | Kiro |
+| 2026-10-05 | T-602 (deploy) | ✅ Pass | Scheduler deployed to demo tenant via `./infra/deploy.sh demo apply` (mgmt sub `6dc67a7b…`, `rg-pwrsched-southeastasia`). Plan R-01 check passed: custom role assigned **only** at `demo-landingzones` + `demo-sandbox`. Function code published (zip remote build); `reconcile - [timerTrigger]` registered. Outputs: func `func-pwrsched-eorw`, appcs `appcs-pwrsched-eorw`, appi `appi-pwrsched`. Required 4 product/config fixes — see 2026-10-05 fixes below. | Kiro |
+| 2026-10-05 | C1 | ✅ Pass | Dry-run cycles 06:30/06:45 UTC: prod VM W9 (`rg-demo-prod`, sub tagged `Environment=Prod`) logged `result=production-excluded` every cycle, never acted on. Also BR-003 case-insensitive tag confirmed (mixed-case `Environment=Prod`). | Kiro |
+| 2026-10-05 | H1 | ✅ Pass | §3.4 Query 1: decision records carry all OBS-001 fields; 0 records with empty `runId`/`type`/`profile`/`desiredState`/`actualState`/`result` (only `error`/`action` empty when N/A). | Kiro |
+| 2026-10-05 | N6 | ✅ Pass | §3.4 Query 1: all 18 decisions across two cycles show `dryRun = true` (lowercase string), matching README/VERIFICATION expectations. | Kiro |
+| 2026-10-05 | M4 | 🟡 Partial pass | §3.4 Query 3: `reconcile` invocations = 1 per 15-min bin (06:30, 06:45). Query 4: 0 host storage auth errors in the last 30 min (after the AzureWebJobsStorage fix below). Past-due test (Query 5) not yet run. | Kiro |
+| 2026-10-05 | N3 | ✅ Pass | §3.4 Queries 3 & 6: `pwrsched.summary` count (1 per 15-min bin) matches `reconcile` invocation count for the same bins — telemetry flushed every cycle. | Kiro |
+| 2026-10-05 | §3.3 dry-run | ✅ Pass | Decision breakdown over 2 cycles: `already-converged`×12, `schedule-disabled`×2 (W4 opt-out), `unknown-state-skip`×2, `production-excluded`×2 (W9). 0 Platform-MG (`rg-demo-platform`/W11) resources in decisions. `dryRun=true`, no Activity-Log actions. | Kiro |
+| 2026-10-05 | C3 | ⬜ Not tested | No SQL MI in scope (W14/`enable_sqlmi` not deployed). §3.4 permits recording as "not tested: no SQL MI in scope" until W14 is deployed in Phase B. | Kiro |
+| 2026-10-05 | Product fixes (found during T-602 deploy) | ✅ Fixed | Four issues blocked first deploy, all fixed: (1) `infra/scheduler/providers.tf` — added `storage_use_azuread = true` (provider used shared-key for storage data-plane vs SEC-005 key-disabled → 403; also needed deployer Blob/Queue/Table data roles on state + runtime SAs); (2) `infra/modules/function_app/main.tf` — removed `FUNCTIONS_WORKER_RUNTIME` app setting (Flex Consumption rejects it, BadRequest 51021; runtime set via `runtime_name`); (3) `infra/modules/monitoring/main.tf` — renamed cycle-health measure column `cycles`→`cycleCount` (`cycles` is a reserved KQL keyword → "could not be parsed at ')'"); (4) runtime: platform auto-injected a key-based `AzureWebJobsStorage` connection string (empty key) that overrode the identity-based `AzureWebJobsStorage__*` settings and drained the host with 403s — removed via `az` (Terraform does not re-add it). Items 1–3 are product-code fixes that affect any tenant and should be reviewed/committed. | Kiro |
 
 ### 6.1 Issues found during verification
 

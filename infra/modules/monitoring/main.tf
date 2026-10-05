@@ -71,10 +71,10 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cycle_health" {
     query                   = <<-KQL
       traces
       | where customDimensions["pwrsched.event"] == "pwrsched.summary"
-      | summarize cycles = count()
+      | summarize cycleCount = count()
     KQL
     time_aggregation_method = "Total"
-    metric_measure_column   = "cycles"
+    metric_measure_column   = "cycleCount"
     threshold               = 0
     operator                = "LessThanOrEqual"
 

@@ -97,10 +97,12 @@ resource "azurerm_function_app_flex_consumption" "this" {
 
   app_settings = {
     # Auth: no secrets. The worker uses the user-assigned identity (SEC-001).
-    "AZURE_CLIENT_ID"          = var.identity_client_id
-    "APP_CONFIG_ENDPOINT"      = var.app_config_endpoint
-    "RECONCILE_SCHEDULE"       = var.reconcile_schedule
-    "FUNCTIONS_WORKER_RUNTIME" = "python"
+    "AZURE_CLIENT_ID"     = var.identity_client_id
+    "APP_CONFIG_ENDPOINT" = var.app_config_endpoint
+    "RECONCILE_SCHEDULE"  = var.reconcile_schedule
+    # Note: FUNCTIONS_WORKER_RUNTIME must NOT be set as an app setting on Flex
+    # Consumption sites (the platform rejects it with BadRequest 51021); the
+    # runtime is configured via runtime_name/runtime_version above.
     # Telemetry export to Application Insights via OpenTelemetry (H1).
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = var.app_insights_connection_string
 
