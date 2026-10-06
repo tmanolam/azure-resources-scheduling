@@ -8,7 +8,7 @@
 | Created | 2026-10-04 |
 | Audience | Implementer (Kiro), platform team, presenter |
 | Budget | Azure credit of USD 1,000 in a fresh tenant |
-| Status | In progress — landing zone, workloads, and scheduler deployed; state migrated to remote backend (2026-10-06) |
+| Status | **Live (go-live done 2026-10-06)** — landing zone, workloads (incl. AKS/W12) and scheduler deployed; state on remote backend; T-602 dry-run validated and T-603 go-live complete (`dry_run=false`). SQL MI (W14) out of scope; App Gateway (W13) not deployed |
 
 ## 1. Purpose and outcome
 
@@ -125,7 +125,7 @@ W4 (opt-out), W9 (prod) and W11 (platform) are never stopped by the scheduler, s
 
 | Ref | Resource | Toggle | Tags | Exercises |
 |---|---|---|---|---|
-| W12 | AKS, Free tier, 1 system node `Standard_B2s`; set the node resource group name explicitly (e.g. `rg-demo-aks-nodes`) | `enable_aks` | Standard (default order 2) on the **cluster** only | AKS handler, ordering, start guard, S18 (V1) |
+| W12 | AKS, Free tier, 1 system node `Standard_B2s_v2` (`Standard_B2s` is `NotAvailableForSubscription` in eastasia); set the node resource group name explicitly (e.g. `rg-demo-aks-nodes`) | `enable_aks` | Standard (default order 2) on the **cluster** only | AKS handler, ordering, start guard, S18 (V1) |
 | W13 | Application Gateway `Standard_v2`, fixed capacity 1 | `enable_appgw` | Standard (default order 2) | appgw handler |
 | W14 | SQL Managed Instance, General Purpose, 4 vCores | `enable_sqlmi` | Standard (default order 1) | sqlmi handler, live check C3 |
 
@@ -335,3 +335,4 @@ Notes for Kiro:
 | 0.3 | 2026-10-04 | Management groups and subscriptions renamed to match the target tenant (`demo-workload-np`, `demo-workload-prod`, `sub-demo-workload-*`). Single-subscription fallback (Plan B, DM-22) removed: all four subscriptions use the credit. Added §2.3 note on demo vs. target-tenant scoping and optional DM-15 (prod tag policy). |
 | 0.4 | 2026-10-04 | Added S18 (AKS node pool protection, verifies V1), explicit AKS node resource group name for W12, Phase B gate on V1, and a matching risk row. |
 | 0.5 | 2026-10-06 | Status updated to in-progress. §9 teardown step 6 clarified: state account holds all three roots after migration to remote backend ([DEMO_STATE_BACKEND.md](DEMO_STATE_BACKEND.md)). |
+| 0.6 | 2026-10-06 | **Go-live done (T-603).** Full business-day dry-run validated (morning start + 17:30 stop window), then flipped `dry_run=false` (plan showed only `pwrsched:dryRun`). AKS/W12 provisioned and **S18/V1 verified live** (node-pool scale set logged `aks-managed-node-pool`, never acted on); V1 closed. First live cycle stopped the AKS cluster via the managed identity (SEC-008). **Deviation:** W12 node size is `Standard_B2s_v2`, not `Standard_B2s` (the latter is `NotAvailableForSubscription` in eastasia — same capacity restriction as the demo VMs). SQL MI (W14) kept out of scope by decision; C3 recorded "not tested". Evidence in [VERIFICATION.md §6](VERIFICATION.md#6-results-log). |

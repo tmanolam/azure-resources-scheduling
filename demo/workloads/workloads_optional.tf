@@ -29,7 +29,9 @@ resource "azurerm_kubernetes_cluster" "w12" {
   default_node_pool {
     name       = "system"
     node_count = 1
-    vm_size    = "Standard_B2s"
+    # Standard_B2s is NotAvailableForSubscription in eastasia (same capacity
+    # restriction that moved the demo VMs to Standard_B2s_v2); use the Bsv2 size.
+    vm_size = "Standard_B2s_v2"
   }
 
   identity {
