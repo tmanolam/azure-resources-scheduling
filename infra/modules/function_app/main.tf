@@ -179,8 +179,18 @@ resource "azurerm_function_app_flex_consumption" "this" {
   # checkpoint, run after every apply and code publish. This is preferred over
   # documenting a permanent §4 exception, because a diff in every plan trains
   # operators to ignore plan output.
+  #
+  # DP-05 (follow-up): Azure also injects a `hidden-link: /app-insights-resource-id`
+  # tag on the site when App Insights is wired via
+  # site_config.application_insights_connection_string. It is not in var.tags, so
+  # Terraform wants to strip it on every plan (another spurious "1 to change").
+  # Ignore that one Azure-managed tag key so the §4 checkpoint can pass; our own
+  # tags (owner/cost-centre/project/managed-by) are still enforced.
   lifecycle {
-    ignore_changes = [app_settings["AzureWebJobsStorage"]]
+    ignore_changes = [
+      app_settings["AzureWebJobsStorage"],
+      tags["hidden-link: /app-insights-resource-id"],
+    ]
   }
 
   tags = var.tags
