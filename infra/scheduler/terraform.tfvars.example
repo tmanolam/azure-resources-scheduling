@@ -32,6 +32,14 @@ alert_email_addresses      = ["cloud-platform@example.com"]
 enable_private_networking = false
 # integration_subnet_id   = "/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<snet>"
 
+# DP-06: object ID (an operators *group* recommended) that owns the deployer
+# data-plane role assignments (App Configuration Data Owner; Storage Blob Data
+# Owner + Queue/Table Data Contributor on the runtime storage account). Leave
+# empty to default to whoever runs Terraform. Set it to a stable group so a
+# different person/CI can run plan/apply without churning those assignments or
+# revoking the previous deployer's access.
+# operator_object_id = "<entra-operators-group-object-id>"
+
 tags = {
   owner       = "cloud-platform"
   cost-centre = "<cc>"

@@ -103,3 +103,22 @@ variable "tags" {
   type        = map(string)
   description = "Standard resource tags (IAC-006)."
 }
+
+variable "operator_object_id" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    DP-06: Entra object ID (an operators *group* is recommended, or a user) that
+    receives the data-plane role assignments the deployer needs — App
+    Configuration Data Owner, and Storage Blob Data Owner + Queue/Table Data
+    Contributor on the runtime storage account. These let Terraform read/write
+    App Configuration keys and the runtime storage account during apply.
+
+    Leave empty to default to the identity currently running Terraform
+    (data.azurerm_client_config.current.object_id). Setting it to a stable
+    operators group means a different person or CI identity can run plan/apply
+    without replacing these assignments (which would otherwise churn the plan,
+    breaking the VERIFICATION §4 go-live checkpoint, and revoke the previous
+    deployer's data-plane access). Use a group's object ID for best results.
+  EOT
+}
