@@ -3,8 +3,8 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.4 (Single tenant-wide deployment) |
-| Last updated | 2026-10-03 |
+| Version | 0.5 (Large-tenant scaling requirements) |
+| Last updated | 2026-10-05 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
 | Status | Draft – only OI-01 (deployment-time configuration) remains open |
@@ -238,7 +238,8 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-030 | The system shall support a global dry-run mode that logs intended actions without calling start/stop APIs. | M |
-| FR-031 | The system shall stop processing actions after `maxActionsPerRun` is reached in one cycle and raise an alert. | M |
+| FR-031 | The system shall stop processing actions after `maxActionsPerRun` is reached in one cycle and raise an alert. The cap is a safety brake against mass changes from mis-tagging; it should be sized from the measured peak of legitimate transitions per cycle (§10.1, SC-03). | M |
+| FR-034 | The system shall submit start/stop actions **in parallel** with bounded concurrency (`maxParallelActions`, default 10), honouring the planned start/stop order between order groups, so a cycle can submit the capped number of actions well within the function timeout (§10.1, SC-01). | M |
 | FR-032 | The system shall refuse to act on a hard-coded deny list of resource types (Azure Firewall, virtual network gateways, Bastion, ExpressRoute circuits), regardless of configuration. | M |
 | FR-033 | The system shall skip and log resources in a transitional state (e.g. `Starting`, `Stopping`, `Updating`) and retry in the next cycle. | M |
 
@@ -311,7 +312,7 @@ Source      : FinOps
 | ID | Category | Requirement |
 |---|---|---|
 | NFR-001 | Timeliness | A scheduled transition shall be **submitted** within 15 minutes of its scheduled time (one cycle). |
-| NFR-002 | Performance | One cycle shall complete within 5 minutes for up to 2,000 in-scope resources. |
+| NFR-002 | Performance | For up to **5,000** in-scope resources, one cycle (discovery, planning, and submitting up to `maxActionsPerRun` actions) shall complete within **10 minutes**, and always before the next cycle starts. *(Revised in v0.5 from 2,000 resources / 5 minutes; verified by the SC-05 load test.)* |
 | NFR-003 | Reliability | Missed cycles shall self-heal on the next run (reconciliation). Failed actions shall be retried in each later cycle. |
 | NFR-004 | Concurrency | Only one reconciliation cycle may run at a time (timer singleton lease). |
 | NFR-005 | Throttling | The engine shall limit parallel ARM calls (default 10) and back off on HTTP 429 using the `Retry-After` header. |
@@ -320,6 +321,42 @@ Source      : FinOps
 | NFR-008 | Cost | Run cost of the scheduler shall stay under USD 50/month (excluding a shared Log Analytics workspace). |
 | NFR-009 | Testability | Desired-state evaluation shall be a pure function covered by unit tests (timezones, midnight crossing, overrides). |
 | NFR-010 | Portability | All infrastructure shall be reproducible from Terraform in a new tenant. One scheduler instance is deployed per tenant; an optional `name_suffix` allows a second instance where genuinely needed. |
+| NFR-011 | Telemetry volume | Telemetry volume shall scale with the number of **actions**, not the number of in-scope resources. Decision records for no-op (`already-converged`) results shall be configurable (`logConvergedDecisions`), and the per-cycle summary shall carry enough counts to report savings without them (§10.1, SC-04). |
+
+### 10.1 Scaling backlog — large tenants (SC-)
+
+Large tenants (thousands of in-scope resources) need the changes below. They do
+not change behaviour for small tenants with default settings. IDs use the prefix
+**SC-** (scaling).
+
+**Why.** `maxActionsPerRun` (default 200) limits actions per cycle, and actions are
+currently submitted **one at a time** within a **5-minute** function timeout, so
+one cycle can safely submit only about 200–300 actions. If, say, 4,000 VMs share a
+profile, all 4,000 transition in the same cycle (08:30 or 17:30): with the default
+cap the last VM starts about **5 hours late** (20 cycles); raising the cap alone
+makes the cycle hit the timeout and removes the safety brake. Separately, logging
+one record per resource per cycle means about **480,000 records a day** for 5,000
+resources, a real Application Insights ingestion cost.
+
+| ID | Item | Description | Acceptance criteria | Priority |
+|---|---|---|---|---|
+| SC-01 | Parallel action submission | Submit start/stop actions through a bounded worker pool (`maxParallelActions`, default 10), as N7 does for state reads. Keep the order groups: all order-1 submissions finish before order-2 begin (stops in reverse). Per-action failures stay isolated; HTTP 429 is handled by the azure-core retry policy. | Unit tests: concurrency never exceeds the bound; order groups respected; one failure doesn't stop the others. FR-034. | M |
+| SC-02 | Function time budget | Raise `functionTimeout` in `src/host.json` (proposed `00:12:00`, below the 15-minute cycle). Make it consistent with `reconcile_schedule` (document: timeout must be less than the interval). | `host.json` updated; README states the timeout/interval rule; NFR-002 met in SC-05. | M |
+| SC-03 | Cap design and sizing | (a) Document how to size the cap: measure the busiest dry-run cycle (query below) and set `maxActionsPerRun` ≈ peak × 1.2. (b) Evaluate separate caps for stop and start (`maxStopsPerRun`, `maxStartsPerRun`), since mass stops are the risky direction; or a cap relative to the in-scope count. Record the decision in §17.1. | Sizing guidance in README + VERIFICATION; decision recorded; if separate caps are adopted, unit tests for each and the cap alert still fires (OBS-005). | S |
+| SC-04 | Telemetry volume | Add setting `pwrsched:logConvergedDecisions` (default `true`; recommend `false` above ~1,000 in-scope resources). When `false`, skip per-resource records for `already-converged` results. Add `converged`, `desiredRunning`, `desiredStopped` to the summary (OBS-002). Update hours-saved query Q-G (and the workbook) to use summary counts so it still works. Document an ingestion estimate and an optional Log Analytics daily cap. | Unit tests: converged decisions suppressed when `false`, all others still logged; summary counts correct. Q-G returns the same total either way in a dry-run comparison. NFR-011. | M |
+| SC-05 | Load test | Test with 5,000 simulated resources, a 4,000-resource peak transition, simulated per-call latency (e.g. 300 ms) and simulated 429s, through planning **and** submission. | Cycle completes within NFR-002 (10 minutes); the cap defers the excess and sets `capReached`; no unhandled exceptions. | M |
+| SC-06 | Operating guidance for large tenants | Document in README: stagger profiles by business unit (e.g. 08:00 / 08:15 / 08:30 / 08:45) to lower the peak; ARM write limits are per subscription, so very large single subscriptions transition more slowly; review App Insights ingestion after the first week. | README section "Large tenants" added. | S |
+
+**Peak measurement query (SC-03)** — run during a dry run that covers both
+transition times:
+
+```kusto
+traces
+| where customDimensions["pwrsched.event"] == "pwrsched.decision"
+| where tostring(customDimensions["pwrsched.action"]) in ("start", "stop")
+| summarize actions = count() by runId = tostring(customDimensions["pwrsched.runId"]), bin(timestamp, 15m)
+| top 5 by actions desc
+```
 
 ## 11. Security Requirements
 
@@ -369,8 +406,8 @@ Microsoft.Network/applicationGateways/stop/action
 
 | ID | Requirement |
 |---|---|
-| OBS-001 | Each evaluated resource shall produce one structured log record: `runId`, `resourceId`, `type`, `profile`, `desiredState`, `actualState`, `action`, `dryRun`, `result`, `error`. |
-| OBS-002 | Each cycle shall produce a summary record: counts of evaluated, started, stopped, skipped and failed resources, and duration. |
+| OBS-001 | Each evaluated resource shall produce one structured log record: `runId`, `resourceId`, `type`, `profile`, `desiredState`, `actualState`, `action`, `dryRun`, `result`, `error`. Exception (NFR-011): when `logConvergedDecisions` is `false`, no-op `already-converged` decisions are not logged individually; they are counted in the summary record. Start/stop, skipped, excluded and failed decisions are always logged. |
+| OBS-002 | Each cycle shall produce a summary record: counts of evaluated, started, stopped, skipped and failed resources, and duration. From v0.5 it also carries `converged`, `desiredRunning` and `desiredStopped` counts, so savings reports (hours avoided) work without per-resource no-op records. |
 | OBS-003 | An alert shall fire when a cycle fails or does not run for more than 45 minutes. |
 | OBS-004 | An alert shall fire when the same resource fails an action in 3 consecutive cycles. |
 | OBS-005 | An alert shall fire when `maxActionsPerRun` is reached. |
@@ -546,6 +583,8 @@ Priority: Must
 | R-06 | Wrong timezone configuration | Medium | Low | Unit tests, dry-run pilot, profile review |
 | R-07 | AKS stopped beyond the platform's maximum stopped duration | High | Very low | Alert on clusters stopped longer than 30 days |
 | R-08 | Resources run unused on public holidays until phase 2 | Low | High | Owners set a `stopped` override for long holidays; FR-028 in phase 2 |
+| R-09 | Large tenant: thousands of resources transition in the same cycle, so starts/stops are delayed by the cap or the cycle times out | High | Medium (large tenants) | §10.1: parallel submission (SC-01), longer timeout (SC-02), cap sized from the measured peak (SC-03), staggered profiles (SC-06), load test (SC-05) |
+| R-10 | Large tenant: per-resource decision logging drives high Application Insights ingestion cost | Medium | High (large tenants) | `logConvergedDecisions = false` with summary counts (SC-04, NFR-011); optional workspace daily cap |
 
 ## 17. Open Issues and Gaps
 
@@ -595,3 +634,4 @@ Priority: Must
 | 0.2 | 2026-10-03 | Incorporated decisions D-02 to D-06: standard Bangkok profile, override state tag, all databases in scope, on-demand endpoint deferred to phase 2, production hard-excluded. Added OI-08 (holidays) and OI-09 (Azure SQL Database). |
 | 0.3 | 2026-10-03 | Decisions D-07 (holidays to phase 2, FR-028) and D-08 (Azure SQL Database out of scope). Removed holiday fields from the phase 1 profile schema. Added risk R-08. |
 | 0.4 | 2026-10-03 | Single tenant-wide deployment: one scheduler per tenant (`infra/scheduler`) with an optional `name_suffix`, replacing per-environment (dev/prod) roots. Updated IAC-003, IAC-006, NFR-010, §5.2 and §13.1 (`environment` → `name_suffix` + `role_assignable_scope`). Production remains hard-excluded (BR-003). |
+| 0.5 | 2026-10-05 | Large-tenant scaling: NFR-002 revised to 5,000 resources / 10 minutes; new FR-034 (parallel submission), NFR-011 (telemetry volume); OBS-001/OBS-002 updated (optional no-op decision records, new summary counts); FR-031 cap sizing note; new §10.1 scaling backlog SC-01–SC-06; risks R-09, R-10. |
