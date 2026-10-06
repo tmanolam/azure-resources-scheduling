@@ -644,9 +644,9 @@ as `skipped:<reason>`. Queries that filter on `result startswith "skipped"` —
 including the day-2 workbook's **"Failed or skipped"** panel — therefore miss
 Flexible scale set skips.
 
-- [ ] Use `skipped:<reason>` for plan-time skips too (one prefix everywhere).
-- [ ] Update the reconcile tests that assert `skip:vmss-flexible-unsupported`.
-- [ ] Confirm the cycle summary's `skipped` count includes plan-time skips.
+- [x] Use `skipped:<reason>` for plan-time skips too (one prefix everywhere).
+- [x] Update the reconcile tests that assert `skip:vmss-flexible-unsupported`.
+- [x] Confirm the cycle summary's `skipped` count includes plan-time skips.
 - [ ] Optional live check: a 1-instance **Flexible** scale set tagged with a profile
   for one cycle shows `result=skipped:vmss-flexible-unsupported` and no
   `state-read-failed`; delete it afterwards.

@@ -279,12 +279,15 @@ def plan_actions(
         if _needs_fallback_read(r):
             # Resolved by the prefetch pool. Absent => either the handler asked to
             # skip (HandlerSkip, e.g. a Flexible scale set — V3/HR-008) or the read
-            # failed. A skip is logged as skip:<reason>, not state-read-failed, so
-            # it is not counted as a failure or retried (HR-001/HR-004).
+            # failed. A skip is logged as skipped:<reason>, not state-read-failed, so
+            # it is not counted as a failure or retried (HR-001/HR-004). The
+            # `skipped:` prefix (not `skip:`) matches execution-time skips
+            # (execute_actions, H3) and the day-2 workbook's "Failed or skipped"
+            # panel, which filters `result startswith "skipped"` (V3 follow-up).
             actual = fallback_states.get(r.resource_id)
             if actual is None:
                 skip_reason = fallback_skips.get(r.resource_id)
-                reason = f"skip:{skip_reason}" if skip_reason else "state-read-failed"
+                reason = f"skipped:{skip_reason}" if skip_reason else "state-read-failed"
                 planned.append(_none_action(r, reason, sel.profile_name,
                                             sel.order or 3, decision.warning))
                 continue
