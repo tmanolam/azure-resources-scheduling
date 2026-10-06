@@ -6,6 +6,11 @@ evidence/
 *.tfvars
 !*.tfvars.example
 
+# Real backend configs (keep only the .example templates). The repo-root
+# .gitignore also ignores backend.hcl globally; explicit here for clarity.
+backend.hcl
+!backend.hcl.example
+
 # Terraform working dirs / state (demo uses local state).
 **/.terraform/
 *.tfstate

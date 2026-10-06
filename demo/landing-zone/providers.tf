@@ -23,9 +23,26 @@ terraform {
     }
   }
 
-  # Demo-only: local state is fine for a disposable tenant. The shipped product
-  # (infra/scheduler) uses a remote azurerm backend; the demo does not need one.
-  # Switch to a backend block here if you prefer remote state for the demo.
+  # State backend.
+  #
+  # Default: LOCAL state (a disposable demo tenant does not require remote
+  # state). The current demo state lives on the operator laptop that ran the
+  # applies.
+  #
+  # OPTIONAL remote backend (recommended to avoid split-brain state across
+  # laptops — see docs/DEMO_STATE_BACKEND.md). To switch:
+  #   1. Uncomment the backend block below.
+  #   2. Copy backend.hcl.example → backend.hcl and fill in the demo state
+  #      storage account (reuse infra/tenants/demo.backend.hcl's account; use a
+  #      distinct key, e.g. demo/landing-zone.tfstate).
+  #   3. One-time, FROM THE LAPTOP THAT HOLDS THE LOCAL STATE, run:
+  #        terraform init -migrate-state -backend-config=backend.hcl
+  #      Terraform copies the existing local state up to the backend. Running
+  #      this from a laptop WITHOUT the local state would start empty and plan
+  #      to recreate everything — do not do that.
+  #   4. Afterwards, on any machine: terraform init -reconfigure -backend-config=backend.hcl
+  #
+  # backend "azurerm" {} # configured via backend.hcl
 }
 
 provider "azurerm" {

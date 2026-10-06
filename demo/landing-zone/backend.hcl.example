@@ -1,0 +1,18 @@
+# Remote Terraform state backend for demo/landing-zone (OPTIONAL).
+#
+# The demo defaults to LOCAL state. Use this only if you migrate to remote state
+# (see docs/DEMO_STATE_BACKEND.md). Copy to backend.hcl (gitignored) and fill in
+# the demo state storage account — reuse the same account as
+# infra/tenants/demo.backend.hcl, with a DISTINCT key for this root.
+#
+# Steps:
+#   1. Uncomment the `backend "azurerm" {}` block in providers.tf.
+#   2. cp backend.hcl.example backend.hcl   (and edit)
+#   3. From the laptop holding the local state:
+#        terraform init -migrate-state -backend-config=backend.hcl
+
+resource_group_name  = "rg-tfstate-demo"
+storage_account_name = "demosatfstate"
+container_name       = "tfstate"
+key                  = "demo/landing-zone.tfstate"
+use_azuread_auth     = true

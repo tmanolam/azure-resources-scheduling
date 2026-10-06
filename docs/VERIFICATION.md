@@ -34,8 +34,8 @@ items below.
 |---|---|---|---|
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ✅ Done for the **demo tenant** (`infra/tenants/demo.tfvars`); each real tenant still needs its own |
-| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed + re-applied to demo tenant 2026-10-05; dry-run checklist §3.3 passing; §3.4 Q1/3/4/6 pass; V2 fixed & confirmed live. Still to run: C3 (no SQL MI), H2 (alerts), N4 (mixed-case fixture), M4 past-due, then ≥1 business day |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, all live checks below, V1 fixed (live S18), and the DP-05 §4-checkpoint blocker resolved (residual `AzureWebJobsStorage` plan diff; see `demo/TASKS.md` §8). V2 and V3 are fixed in code (V3 live check needs a Flexible scale set, not in the demo) |
+| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant. Dry-run checklist §3.3 passing; §3.4 Q1/3/4/6 pass. Observed 2026-10-06 (pending reviewer confirmation): S1/S12 start window, H1, N6, **N4** (mixed-case RG), C1, **S3** (sandbox sub inheritance), **S9** (nested-MG exclude), **M4** (past-due recovery). Still to run: **H2** (alerts, S15), **C3** (no SQL MI deployed), then ≥1 business day |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, remaining live checks (H2, C3) and ≥1 full business day of correct dry-run. **DP-05 §4-checkpoint blocker RESOLVED 2026-10-06**: live `plan` now reports "No changes" (fixed the residual `hidden-link` App Insights tag diff via `ignore_changes`; the `AzureWebJobsStorage` diff was already gone). V1 live check (S18) still pending; V2/V3 fixed in code (V3 live needs a Flexible scale set, not in the demo) |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
 | V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | ✅ Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008) — live check pending (no Flexible VMSS in the demo) |
@@ -52,9 +52,9 @@ must pass before T-603. Background on each ID is in
 | C3 | SQL MI `actualState` never `Unknown` | [§3.4](#34-live-verification-of-review-findings), Query 2 | ⬜ Not tested yet — no SQL MI in scope (W14 not deployed; §3.4 permits "not tested") |
 | H1 | Decision records carry all OBS-001 fields | §3.4, Query 1 | ✅ Pass (demo 2026-10-05: 0 decisions with empty required fields) |
 | H2 | Cycle-health and cycle-exceptions alerts fire | [§5](#5-alert-verification-obs-003004005) | 🔍 Pending — alert-firing tests (S15) not run yet |
-| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | 🟡 Partial — timer fires 1/15 min, 0 storage auth errors (Q3/Q4 pass); past-due test (Q5) not run yet |
+| M4 | Timer fires on schedule; past-due recovery; no storage auth errors | §3.4, Queries 3–5 | ✅ Pass (demo 2026-10-06: timer 1/15 min, 0 storage auth errors; past-due test — app down 05:00–05:20 UTC, `pwrsched: timer past due` recovery at 05:20:57, cadence resumed 05:30 — pending reviewer confirmation) |
 | N3 | Summary count matches invocation count | §3.4, Queries 3 and 6 | ✅ Pass (demo 2026-10-05: 1 summary = 1 invocation per 15m bin) |
-| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | 🔍 Pending — no new fixture needed in the demo: run Query 7 with `RG-Demo-MixedCase` (W2's resource group, tagged only at RG level) |
+| N4 | Mixed-case RG profile inheritance | §3.4, Query 7 | ✅ Pass (demo 2026-10-06: `vm-demo-w2` in `RG-Demo-MixedCase`, no own tags, resolved `profile=weekday-0830-1730` by RG inheritance — pending reviewer confirmation) |
 | N6 | `dryRun` stored as `true` | §3.4, Query 1 | ✅ Pass (demo 2026-10-05: all decisions `dryRun = true`, lowercase) |
 
 ---
@@ -444,6 +444,12 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-05 | V2 | ✅ Fixed + confirmed live | Identified via §3.4 Q1 as **W6 `vmss-demo-w6`**. Root cause: `vmss` handler read the scale-set-level instance view, which carries no `PowerState/*` for Uniform VMSS → `unknown`. Fixed `src/handlers/vmss.py` to aggregate per-instance power states (`virtual_machine_scale_set_vms.list`/`get_instance_view`); 8 unit tests + SDK-surface rows added (156 passed/8 skipped, ruff clean). Re-published code; **14:00 UTC cycle shows 0 `unknown-state-skip`** (W6 now `already-converged`, `actualState=Stopped`). Remaining: observe W6 while **running** (Phase B/S1L) for the running→deallocate path. | Kiro |
 | 2026-10-05 | V2 review, V3, N4, DP-05 | 🔍 Review recorded | Review of `96fb97c` + `8eee22f`: V2 fix correct for Uniform scale sets; 164 tests pass with SDKs, strict SDK surface 8 passed, ruff clean. Opened **V3** (Flexible-mode scale sets unsupported by the per-instance read; see §6.1). N4 can use W2's `RG-Demo-MixedCase` (§3.4 note). DP-05 recommendation recorded in `demo/TASKS.md` §8. Tomorrow's dry run should log `action=start` for W7/W8 at 08:00 and W1/W2/W3/W5/W6 at 08:30 Bangkok (S1/S12; 08:15 slot empty without W12/W13). | Claude |
 | 2026-10-05 | V3 | ✅ Fixed in code | `src/handlers/vmss.py` now reads `orchestration_mode` first: **Uniform** → `virtual_machine_scale_set_vms.list(expand="instanceView")` (one call, falls back to per-instance `get_instance_view` if not inlined) then aggregates; **Flexible** → `HandlerSkip("vmss-flexible-unsupported")`. `src/engine/reconcile.py` `_prefetch_fallback_states` now distinguishes a `HandlerSkip` from a read failure, so a Flexible VMSS is logged `skip:vmss-flexible-unsupported` (not `state-read-failed`) and `failed == 0`. Added REQUIREMENTS **HR-008**; 5 new/updated vmss unit tests + 2 reconcile tests + `virtual_machine_scale_sets.get` in the SDK-surface matrix. Suite **161 passed / 8 skipped**, ruff clean. Live check (a real Flexible scale set) carried forward — none in the demo. | Kiro |
+| 2026-10-06 | S1, S12, H1, N6, N4, C1, V2 | 🔍 Observed — pending reviewer confirmation | **Morning start window observed** (Tue 2026-10-06, Bangkok), dry-run — these items keep their prior tracker status until the reviewer confirms. **S12 ordering:** 01:00 UTC (08:00 BKK) only W7 `psql-demo-w7` + W8 `mysql-demo-w8` (order 1) log `action=start`; 08:15 slot empty (no W12/W13); 01:30 UTC (08:30 BKK) W1/W2/W3/W5 VMs + W6 `vmss-demo-w6` (order 3) join. All starts `desired=Running, actual=Stopped, dryRun=true` (lowercase → **N6**), all OBS-001 fields populated (**H1**), profile `weekday-0830-1730`. **N4:** W2 (`RG-Demo-MixedCase`, no own tags) inherited the RG profile and logged `start`. **C1/N5:** W9 `production-excluded, action=none` every cycle. Opt-out W4 `schedule-disabled, action=none`. **No Platform-MG (W11/`rg-demo-platform`)** resource in any decision. **V2 running path:** `vmss-demo-w6` read `actual=Stopped` (real per-instance state, not `Unknown`) and logged `action=start`. Steady 9 decisions + 1 summary per 15-min cycle (**N3**). Only the start boundary seen — 17:30 stop side, go-live, and H2/M4/C3/V1/V3 still pending. (CLI query gotcha found while collecting this: see §6.2.) | Kiro |
+| 2026-10-06 | S3 | 🔍 Observed — pending reviewer confirmation | **Sandbox subscription-level tag inheritance** (dry-run). After `sub-demo-sandbox` (`a8572700-…`) was placed under the in-scope `demo-sandbox` MG, tagged `environment=sandbox` + `schedule-profile=sandbox-default` (DM-11/12), and W10 `vm-demo-w10` deployed (DM-20, `rg-demo-sandbox`, eastasia), the scheduler discovered it on the **03:45 UTC** cycle. Decision count stepped 9→10 exactly at that cycle (prior cycles 02:30–03:30 had 0 W10). W10 logged `profile=sandbox-default` with **empty own tags** (Resource Graph `tags: {}`), i.e. the profile was **inherited from the subscription tag** — the subscription-level counterpart of N4's RG inheritance. `desired=Running, actual=Running, action=none, result=already-converged` (10:48 BKK is inside the sandbox-default 08:30–18:00 window; W10 deployed running). Exclusions intact in the same cycle (W9 `production-excluded`, W4 `schedule-disabled`, no Platform-MG/W11). Confirms per-profile evaluation across subscriptions (W10 `sandbox-default` vs dev workloads `weekday-0830-1730`). Still pending for sandbox: **S9** (nested-MG exclusion — move the sub into `demo-sandbox-excluded`). | Kiro |
+| 2026-10-06 | S9 | 🔍 Observed — pending reviewer confirmation | **Nested-MG exclusion** (dry-run), via `demo/scripts/scenario-move-sandbox-mg.sh`. Moved `sub-demo-sandbox` from the in-scope `demo-sandbox` into the nested **`demo-sandbox-excluded`** (an `excluded_scope_id`), inside the in-scope `demo-sandbox` branch. Resource Graph `managementGroupAncestorsChain` updated to include `demo-sandbox-excluded` within ~1 min. **Clean transition in W10's decisions:** 03:45/04:00 UTC `already-converged` (in scope) → **04:15/04:30 UTC `excluded-scope`, `action=none`** (M2 nested-MG exclusion firing on the ancestry chain). Note the engine still **emits a decision record** for W10 with `result=excluded-scope` (auditable skip), rather than silently dropping it — so a summary count of "W10 present" stays 10; the pass signal is the `result`, not absence. Then `restore` moved the sub back under `demo-sandbox` (MG chain + ARG ancestry confirmed back to `Tenant Root → demo → demo-sandbox`), returning the landing zone to its Terraform-expected placement (no drift). W10 returns to `already-converged` once ARG re-settles. | Kiro |
+| 2026-10-06 | M4, S16 | 🔍 Observed — pending reviewer confirmation | **Past-due recovery (FR-007)** test, dry-run. Stopped `func-pwrsched-eorw` 05:00→05:20 UTC (20 min, > the 15-min interval), spanning the 05:15 occurrence. Timeline: summaries at 04:45 & 05:00; **05:15 missed** (app down, no summary); app started 05:20:37; at **05:20:57 UTC** host logged `pwrsched: timer past due; running recovery cycle (FR-007) run=d256b883-…` (Query 5); **recovery summary 05:21:00**; **normal cadence resumed 05:30:03**. Confirms NFR-003 self-heal: missed cycle → immediate run on recovery → regular schedule resumes. **DP-04 across cold-start:** Query 4 (host storage auth errors) **empty** after the restart — the identity-based `AzureWebJobsStorage__*` connection held, no 403s. `az functionapp` commands required explicit `--subscription 6dc67a7b-…` (demo management sub) as the CLI default had shifted. This advances the M4 tracker item from 🟡 partial toward complete (past-due was the outstanding piece). | Kiro |
+| 2026-10-06 | N4 | 🔍 Observed — pending reviewer confirmation | **Mixed-case RG inheritance** (Query 7), dry-run. `vm-demo-w2` — whose resource ID preserves the exact casing `resourceGroups/RG-Demo-MixedCase` and which has **no own schedule tags** — resolved `profile=weekday-0830-1730`, inherited from the **RG-level** tag. Confirms the N4 fix (KQL lowercases both sides of the RG join, `rgKey = tolower(resourceGroup)`), so a mixed-case RG name does not break inheritance. Used W2's existing `RG-Demo-MixedCase` rather than a new fixture, per the §3.4 note. | Kiro |
+| 2026-10-06 | DP-05 | ✅ Fixed + confirmed live | **Clean plan achieved — strict §4 go-live checkpoint can now pass.** A live `./infra/deploy.sh demo plan` (remote state `demosatfstate`) first showed the `AzureWebJobsStorage` diff was already **gone** (the earlier `ignore_changes` works), but revealed a *residual* `0 add / 1 change / 0 destroy`: Azure injects a `hidden-link: /app-insights-resource-id` **tag** on the Function App (from `site_config.application_insights_connection_string`) that is not in `var.tags`, so Terraform wanted to strip it every plan. **Fix:** added `tags["hidden-link: /app-insights-resource-id"]` to the existing `lifecycle { ignore_changes }` on `azurerm_function_app_flex_consumption.this` (`infra/modules/function_app/main.tf`), alongside the `AzureWebJobsStorage` entry. Re-plan → **"No changes. Your infrastructure matches the configuration."** `terraform fmt -check -recursive infra/` exit 0, `terraform validate` Success. Our own tags (owner/cost-centre/project/managed-by) are still enforced. Note: `ignore_changes` is persisted to state on the next `apply`; the plan already reads clean, so the go-live `dry_run=false` apply will show only the `pwrsched:dryRun` change. Supersedes the 2026-10-05 note that an `AzureWebJobsStorage` diff persisted (now stale). | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -625,3 +631,58 @@ Related points:
   (Not available in the current demo — W6 is Uniform; carry to a tenant that has
   a Flexible scale set.)
 
+
+
+### 6.2 Tooling notes found during verification
+
+These are documentation/tooling observations, kept **separate** from the query
+snippets in the README and §3.4 (those are intentionally left as-is pending a
+decision). Recorded here for the reviewer.
+
+#### V4 — `az monitor app-insights query` returns no rows (workspace-based App Insights)
+
+| | |
+|---|---|
+| **Severity** | Low (tooling / docs; no product impact) |
+| **Status** | 🔍 Recorded — fix to README/§3.4/`collect-evidence.sh` not yet made (pending decision) |
+| **Found** | 2026-10-06, while collecting the morning start-window evidence (dry-run) |
+| **Location** | README Step 6; VERIFICATION §3.4 (all queries); `demo/scripts/collect-evidence.sh` |
+
+**Description.** The documented evidence queries use
+`az monitor app-insights query --app appi-pwrsched …`. Against the demo
+scheduler this returns **zero rows** even for an unfiltered `traces | take`.
+`appi-pwrsched` is a **workspace-based** Application Insights (linked to the Log
+Analytics workspace `log-pwrsched`), so telemetry is stored in the workspace, in
+the **`AppTraces`** table with custom dimensions under **`Properties[...]`** —
+not in the classic `traces` / `customDimensions` the app-insights CLI reads. The
+Azure Portal "Logs" blade works because it queries the workspace directly.
+
+**Confirmed.** `az monitor app-insights component show` reports
+`workspace: …/workspaces/log-pwrsched`. Querying the workspace returns the data:
+
+```bash
+# workspace GUID (customerId) of log-pwrsched
+WS=$(az monitor log-analytics workspace show \
+  -g rg-pwrsched-southeastasia --workspace-name log-pwrsched \
+  --query customerId -o tsv)
+
+az monitor log-analytics query --workspace "$WS" --analytics-query '
+AppTraces
+| where TimeGenerated > ago(1h)
+| where tostring(Properties["pwrsched.event"]) == "pwrsched.decision"
+| take 20'
+```
+
+Translation from the documented KQL: table `traces` → `AppTraces`,
+`customDimensions["pwrsched.*"]` → `Properties["pwrsched.*"]`, `timestamp` →
+`TimeGenerated`.
+
+**Options (not yet applied — reviewer to decide).**
+- Update the README Step 6 / §3.4 snippets and `collect-evidence.sh` to use
+  `az monitor log-analytics query` against the workspace; or
+- keep the app-insights snippets and document the workspace alternative beside
+  them; or
+- confirm whether a classic (non-workspace) App Insights was intended.
+
+**Note.** This is tooling only. The telemetry itself is correct and complete
+(H1/N3/N6 observed via the workspace query — see the 2026-10-06 results-log row).

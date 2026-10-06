@@ -23,6 +23,26 @@ terraform {
       version = "~> 4.0"
     }
   }
+
+  # State backend.
+  #
+  # Default: LOCAL state (disposable demo tenant). The current demo workloads
+  # state lives on the operator laptop that ran the applies.
+  #
+  # OPTIONAL remote backend (recommended — see docs/DEMO_STATE_BACKEND.md). To
+  # switch:
+  #   1. Uncomment the backend block below.
+  #   2. Copy backend.hcl.example → backend.hcl and fill in the demo state
+  #      storage account (reuse infra/tenants/demo.backend.hcl's account; use a
+  #      distinct key, e.g. demo/workloads.tfstate).
+  #   3. One-time, FROM THE LAPTOP THAT HOLDS THE LOCAL STATE, run:
+  #        terraform init -migrate-state -backend-config=backend.hcl
+  #      This copies the existing local state (which already knows about W1–W11)
+  #      up to the backend. Running it from a laptop WITHOUT the local state
+  #      would start empty and plan to recreate all workloads — do not do that.
+  #   4. Afterwards, on any machine: terraform init -reconfigure -backend-config=backend.hcl
+  #
+  # backend "azurerm" {} # configured via backend.hcl
 }
 
 # Non-production workloads (W1–W8, W12–W14).
