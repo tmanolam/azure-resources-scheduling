@@ -41,6 +41,15 @@
 > **Recommendation:** start with **A** (the current model), sized per SC-03's
 > peak measurement. Add B/C only if operational experience shows a single cap is
 > insufficient. Record the decision in REQUIREMENTS §17.1 as D-09.
+>
+> **Reviewer recommendation (2026-10-06): option A.** Keep a single
+> `maxActionsPerRun`, sized from the measured peak (SC-03). **Do not adopt
+> option C:** this scheduler's normal behaviour is to stop almost every in-scope
+> resource in the same cycle (17:30 for the standard profile), so a "never stop
+> more than 50% in one cycle" floor would block legitimate daily stops and
+> defer half the estate to later cycles. Option B (separate stop/start caps)
+> remains a possible later refinement if operations show a need. **Decision
+> pending the product owner**; once made, record it as D-09 in REQUIREMENTS §17.1.
 
 ---
 
