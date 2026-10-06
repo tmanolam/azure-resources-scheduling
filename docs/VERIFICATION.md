@@ -34,11 +34,11 @@ items below.
 |---|---|---|---|
 | T-601 | Static checks and unit tests | [§1](#1-static-checks--unit-tests-t-601) | ✅ Done (enforced in CI) |
 | OI-01 | Real `in_scope_management_group_ids` and `excluded_scope_ids` in `terraform.tfvars` | [§2](#2-prerequisites-for-a-live-deploy-t-602t-603) | ✅ Done for the **demo tenant** (`infra/tenants/demo.tfvars`); each real tenant still needs its own |
-| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant. **Confirmed by review 2026-10-06:** §3.3 checklist, S1/S12 morning start window, H1, N3, N4, N6, C1/N5, S3, S9, M4 (incl. past-due). Still to run: **H2** (alerts, S15) and the **17:30 stop window** today (reverse order), which completes ≥1 full business day. C3 recorded as not tested (no SQL MI) |
-| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete, remaining live checks (H2, C3) and ≥1 full business day of correct dry-run. **DP-05 §4-checkpoint blocker RESOLVED 2026-10-06**: live `plan` now reports "No changes" (fixed the residual `hidden-link` App Insights tag diff via `ignore_changes`; the `AzureWebJobsStorage` diff was already gone). V1 live check (S18) still pending; V2/V3 fixed in code (V3 live needs a Flexible scale set, not in the demo) |
+| T-602 | Deploy and dry-run validation | [§3](#3-deploy--dry-run-validation-t-602) | 🟡 In progress — deployed to demo tenant. **Confirmed by review 2026-10-06:** §3.3 checklist, S1/S12 morning start window, H1, N3, N4, N6, C1/N5, S3, S9, M4 (incl. past-due), **H2 (both alerts fired live)**. Still to run: the **17:30 stop window** today (reverse order), which completes ≥1 full business day. C3 recorded as not tested (no SQL MI) |
+| T-603 | Go-live | [§4](#4-go-live-t-603) | ⬜ Not started — needs T-602 complete (only the 17:30 stop window remains; H2 done), C3 (not tested — no SQL MI), and ≥1 full business day of correct dry-run. **DP-05:** config fix in place (`hidden-link` tag + `AzureWebJobsStorage` both ignored); the plan is clean **after the next apply** (`ignore_changes` persists to state on apply — the go-live `dry_run=false` apply will show only `pwrsched:dryRun`). **DP-06 fixed** (`operator_object_id`; no plan churn). V1 live check (S18) still pending; V2/V3 fixed in code (V3 live needs a Flexible scale set, not in the demo) |
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | 🔍 Fixed in code — live check pending (demo scenario S18; AKS/W12 not yet deployed) |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
-| V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | 🟡 Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008). **Follow-up open:** result prefix `skip:` vs `skipped:` (see §6.1 V3). Live check pending (no Flexible scale set in the demo; optional 1-instance test) |
+| V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | ✅ Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008). **Skip-prefix follow-up fixed** (`4fafb3f`): plan-time skips now use `skipped:<reason>` matching execution-time and the workbook filter. Live check pending (no Flexible scale set in the demo) |
 | V4 | `az monitor app-insights query` returns no rows (workspace-based App Insights) | [§6.2](#62-tooling-notes-found-during-verification) | 🔴 Decision made — CLI tooling to be switched to the workspace (`az monitor log-analytics query`); portal, workbook and alerts unchanged |
 
 ### Live checks carried over from the code review
@@ -71,9 +71,9 @@ python -m pip install pytest tzdata     # once
 python -m pytest -q
 ```
 
-**Expected:** all tests pass (currently **136 passed, 7 skipped**). The 7 skipped
+**Expected:** all tests pass (currently **161 passed, 8 skipped**). The 8 skipped
 are the SDK surface checks, which need `src/requirements.txt` installed and run in
-the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 143 pass. The
+the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 169 pass. The
 suite covers the pure evaluator (timezones, midnight crossing, overrides),
 discovery (paging, Resource Graph joins and power state), selection (production
 hard-exclusion and its fail-safe, tag precedence, scope exclusion),
@@ -585,7 +585,7 @@ ruff clean.
 | | |
 |---|---|
 | **Severity** | Medium (High for tenants that use Flexible scale sets) |
-| **Status** | 🟡 Fixed in code (2026-10-05) — **follow-up open** (result prefix, below); live check pending (no Flexible VMSS in the demo tenant) |
+| **Status** | ✅ Fixed in code (2026-10-05) — **skip-prefix follow-up fixed 2026-10-06** (`4fafb3f`, below); live check pending (no Flexible VMSS in the demo tenant) |
 | **Found** | 2026-10-05, review of the V2 fix (`96fb97c`) |
 | **Location** | `src/handlers/vmss.py` (`get_state`) |
 | **Related** | V2, FR-004, HR-001, NFR-002 |

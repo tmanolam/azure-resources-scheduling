@@ -31,9 +31,9 @@ These are done by the operator, not Kiro. Tracked here for context.
 |---|---|---|---|---|
 | DM-01 | Create demo tenant + activate credit | 🔵 | ✅ | Operator — tenant `1b0a7c64…` active; deploys succeeded against it (2026-10-05) |
 | DM-02 | Confirm credit limits (subscriptions, regions, services, spending limit) | 🔵 | ✅ | 4-subscription Plan A confirmed; 3 subs funded (sandbox pending). Note: `southeastasia` had **no VM capacity** for B-series (not a quota issue — regional vCPU limit 65, usage 0); workloads moved to `eastasia` |
-| DM-03 | Create + rename subscriptions (§2.1) | 🔵 | 🟡 | 3 of 4 created (management, workload-dev, workload-prod); `sub-demo-sandbox` still pending Azure quota |
+| DM-03 | Create + rename subscriptions (§2.1) | 🔵 | ✅ | All 4 created: management, workload-dev, workload-prod, **`sub-demo-sandbox` (`a8572700-…`, created 2026-10-06)** |
 | DM-04 | Elevate access (UAA at Tenant Root), re-login | 🔵 | ✅ | Done — MG/role-assignment/tag operations succeeded. ⏳ Turn off again after full teardown (§9) |
-| DM-05 | Register resource providers in each subscription | 🔵 | 🟡 | All 12 providers Registered on the 3 existing subs. ⏳ Re-run for `sub-demo-sandbox` once created |
+| DM-05 | Register resource providers in each subscription | 🔵 | ✅ | All 12 providers Registered on all 4 subs (sandbox confirmed 2026-10-06: Compute, Network, Storage verified via `az provider show`) |
 | DM-06 | Check vCPU quota in `southeastasia` (≥10 B-series) | 🔵 | ✅ | Quota fine (65 vCPUs). But B-series had a **capacity restriction** in `southeastasia`/`eastasia`; `Standard_B2ts_v2` has capacity in `eastasia` — workloads deployed there with that size |
 | DM-07 | Check SQL MI free-offer eligibility | 🔵 | ⬜ | Decides W14 funding (W14 not yet deployed) |
 
@@ -43,7 +43,7 @@ These are done by the operator, not Kiro. Tracked here for context.
 
 | Group | Tasks | Done | Status |
 |---|---|---|---|
-| Scripts & prerequisites | DM-05, DM-40, DM-42, DM-43 | 4 / 4 (DM-05 live-partial) | 🟡 |
+| Scripts & prerequisites | DM-05, DM-40, DM-42, DM-43 | 4 / 4 | ✅ |
 | Landing zone (Terraform) | DM-10–DM-14 | 5 / 5 code + **applied to demo tenant** | ✅ |
 | Workloads (Terraform) | DM-20–DM-23 | 4 / 4 code + **core applied (eastasia)** | ✅ |
 | Scheduler deployment | DM-30–DM-31 | 2 / 2 — **deployed + code published, dry-run cycle verified** | ✅ |
@@ -51,11 +51,13 @@ These are done by the operator, not Kiro. Tracked here for context.
 | Runbook | demo/README.md | 1 / 1 | ✅ |
 | **Total** | | **17 / 18** | 🟡 |
 
-> **Live status (2026-10-05):** Landing zone, core workloads (W1–W9, W11 + VMSS + 2 DBs) and
-> the scheduler are all deployed. The `reconcile` timer runs every 15 min in **dry-run** and the
-> dry-run checklist passes (see VERIFICATION §6 results log). Remaining before T-603 go-live:
-> H2 alert tests (S15), M4 past-due test (S16), N4 mixed-case fixture, optional W12–W14, the
-> sandbox subscription (W10/S3/S9), and ≥1 full business day of dry-run.
+> **Live status (2026-10-06):** Landing zone (all 4 subs placed, incl. sandbox), core workloads
+> (W1–W9, W11 + VMSS + 2 DBs) and W10 (sandbox) are all deployed. The `reconcile` timer runs
+> every 15 min in **dry-run** and the dry-run checklist passes. **Completed 2026-10-06:**
+> S1/S12 morning start window, S3 (sandbox sub inheritance), S9 (nested-MG exclusion), M4
+> (past-due recovery), N4 (mixed-case RG), H2 (both OBS-003 alerts fired live). Remaining
+> before T-603 go-live: the 17:30 stop window (S1/S12 reverse), optional W12–W14, V1/S18
+> (AKS, needs W12), and ≥1 full business day of dry-run.
 
 ---
 
@@ -71,9 +73,10 @@ All of these are code/docs, validated offline — **no subscription required**:
 - `demo/queries/*.kql` (DM-41) — KQL authored against the known telemetry contract
 
 Blocked until the live tenant exists (🔵): ~~DM-11, DM-12, DM-13 apply-time behaviour,
-DM-31 deploy~~ — **all done 2026-10-05**. Still 🔵: W10 and scenarios needing the
-sandbox subscription (S3, S9), and the remaining live scenario runs / verification
-(S10–S18, T-603 go-live). See §8 for the fixes the live deploy required.
+DM-31 deploy~~ — **all done 2026-10-05**. ~~Still 🔵: W10 and scenarios needing the
+sandbox subscription (S3, S9)~~ — **sandbox created + placed, W10 applied, S3 and S9
+verified 2026-10-06**. Still 🔵: the remaining live scenario runs (S10–S18 except S9;
+e.g. S18/V1 needs W12) and T-603 go-live. See §8 for the fixes the live deploy required.
 
 ---
 
@@ -91,19 +94,19 @@ sandbox subscription (S3, S9), and the remaining live scenario runs / verificati
 - **Buildability:** 🔵 Needs the subscriptions to exist (incl. `sub-demo-sandbox`)
 - **DoD:** `azurerm_management_group_subscription_association` for each sub under its MG.
   Terraform **resource** authorable now behind a variable; real IDs needed to apply.
-- **Status:** ✅ (code + **applied 2026-10-05**: management/workload-dev/workload-prod placed under their MGs; sandbox count-gated, pending its subscription)
+- **Status:** ✅ (code + **applied 2026-10-05**: management/workload-dev/workload-prod placed under their MGs; **sandbox placed under `demo-sandbox` 2026-10-06**, verified via MG entity chain)
 
 ### DM-12 — Subscription tags (§2.1)
 - **Buildability:** 🔵 Needs subscriptions; code 🟢
 - **DoD:** `environment` tags per §2.1 incl. deliberately mixed-case `Environment=Prod`
   (tests N5) and `schedule-profile=sandbox-default` on sandbox. Use `azapi`
   (`Microsoft.Resources/tags`) or `az tag update` (azurerm has no subscription-tag resource).
-- **Status:** ✅ (code + **applied 2026-10-05**: `az tag list` confirms `Environment=Prod` on the prod sub (mixed case, N5) and `environment` tags on management/dev; sandbox tag count-gated)
+- **Status:** ✅ (code + **applied 2026-10-05**: `az tag list` confirms `Environment=Prod` on the prod sub (mixed case, N5) and `environment` tags on management/dev; **sandbox tags `environment=sandbox` + `schedule-profile=sandbox-default` applied 2026-10-06**)
 
 ### DM-13 — Budgets + email alerts at USD 250/500/750
 - **Buildability:** 🔵 Needs the credit subscription(s); code 🟢
 - **DoD:** `azurerm_consumption_budget_subscription` with 3 notifications. Visible in Cost Management after apply.
-- **Status:** ✅ (code + **applied 2026-10-05**: 3 budgets created (management/dev/prod) at 250/500/750; 4th added when sandbox exists)
+- **Status:** ✅ (code + **applied 2026-10-05**: 3 budgets created (management/dev/prod) at 250/500/750; **4th budget (sandbox) added 2026-10-06**)
 
 ### DM-14 — Outputs + demo.tfvars renderer
 - **Buildability:** 🟢 fully offline
@@ -120,7 +123,7 @@ sandbox subscription (S3, S9), and the remaining live scenario runs / verificati
 - **DoD:** W1–W11 with exact tags/placement; **mixed-case RG name `RG-Demo-MixedCase`
   preserved exactly** (S2/N4). VMs: `Standard_B1s`, no public IP, no inbound, generated SSH key.
   One VNet per subscription, no peering. `terraform validate` passes.
-- **Status:** ✅ (authored + **applied 2026-10-05**: W1–W9, W11 + VMSS W6 + PostgreSQL W7 / MySQL W8 all running; `RG-Demo-MixedCase` casing preserved. ⚠️ **Deviation from DoD:** `Standard_B1s` was capacity-restricted in `southeastasia` *and* `eastasia`; deployed with `Standard_B2ts_v2` in **`eastasia`** (both set in `demo/workloads/terraform.tfvars`). W10 sandbox still 🔵)
+- **Status:** ✅ (authored + **applied 2026-10-05**: W1–W9, W11 + VMSS W6 + PostgreSQL W7 / MySQL W8 all running; `RG-Demo-MixedCase` casing preserved. ⚠️ **Deviation from DoD:** `Standard_B1s` was capacity-restricted in `southeastasia` *and* `eastasia`; deployed with `Standard_B2ts_v2` in **`eastasia`** (both set in `demo/workloads/terraform.tfvars`). **W10 sandbox applied 2026-10-06** (`vm-demo-w10` in `rg-demo-sandbox`, eastasia; S3 subscription-inheritance verified))
 
 ### DM-21 — Optional toggles (§4.2)
 - **Buildability:** 🟢 offline
@@ -347,3 +350,4 @@ from demo-scaffold review findings (DR-) and live verification issues (V-).
 | 2026-10-05 | DP-01, DP-04, DP-05, DP-06, V2, M4/N3/H1/N6 | **Re-apply from new laptop + live verification + V2 fix** | Scheduler state is **remote** (`demosatfstate`); re-applied from a second laptop via `./infra/deploy.sh demo` (`init -reconfigure` pulled remote state — the other laptop only held demo landing-zone/workloads *local* state, not needed here). No manual deployer roles existed to delete for this (different) deployer. `apply`: **3 added** (deployer Blob/Queue/Table roles, DP-01) **+ 1 changed** (func app `AzureWebJobsStorage`→null, DP-04) **+ 0 destroyed** — no `409`. **DP-01 ✅ live, DP-04 ✅ live** (host-storage checkpoint pass; §3.4 Q4 empty = no storage auth errors; Q3 timer ~1/15 min). **DP-05 🟡 partial** — re-plan still shows `0/1/0`: a residual `AzureWebJobsStorage → null` diff (azurerm #29149) keeps the strict §4 checkpoint from passing. **DP-06 🔴** no churn this round (new deployer, original roles not in state). §3.4 Queries 1/3/4/6 ✅ (H1/N6/M4/N3). **V2 ✅ fixed + confirmed live**: identified as W6 `vmss-demo-w6`; `src/handlers/vmss.py` now aggregates per-instance power state; 8 unit tests + SDK-surface rows (156 passed/8 skipped, ruff clean); re-published code; 14:00 UTC cycle shows **0 `unknown-state-skip`**. Committed to `main` (`96fb97c`). Also manually deallocated W1/2/3/5/7/8 (user) and **W6** (to position all scheduled dev resources Stopped for the Tue 08:00/08:15/08:30 Bangkok dry-run start-window observation = S1/S12). |
 | 2026-10-05 | V2, V3, DP-05, N4 | Review of `96fb97c` + `8eee22f` recorded | V2 fix correct for Uniform; **V3** opened in VERIFICATION §6.1 (Flexible-mode scale sets unsupported; also N+1 API calls per Uniform scale set). DP-05: recommend `ignore_changes` on `app_settings["AzureWebJobsStorage"]` + §3.2 checkpoint. N4: run Query 7 with `RG-Demo-MixedCase` (no new fixture). DP-06 now live: the storage roles belong to the second laptop's identity, so run the go-live plan from there. |
 | 2026-10-05 | V3, DP-05 | **V3 fixed + DP-05 closed** | **V3:** `src/handlers/vmss.py` now reads `orchestration_mode` first — Uniform uses `virtual_machine_scale_set_vms.list(expand="instanceView")` (single call, per-instance fallback if not inlined) and aggregates; Flexible raises `HandlerSkip("vmss-flexible-unsupported")`. `src/engine/reconcile.py` `_prefetch_fallback_states` distinguishes `HandlerSkip` from a read failure → logged `skip:<reason>`, `failed==0` (not `state-read-failed`). Added REQUIREMENTS **HR-008**; vmss + reconcile unit tests + `virtual_machine_scale_sets.get` SDK-surface row; **161 passed / 8 skipped**, ruff clean. Live check (a real Flexible scale set) carried forward — none in the demo. **DP-05:** added `lifecycle { ignore_changes = [app_settings["AzureWebJobsStorage"]] }`; `./infra/deploy.sh demo plan` now reports **No changes** — the §4 go-live checkpoint can pass. Host-storage safety net re-verified. `terraform fmt`/`validate` clean. |
+| 2026-10-06 | DM-03, DM-05, DM-11, DM-12, DM-13, DM-20, S1/S12, S3, S9, M4/S16, N4, H2/S15, DP-05, DP-06, V3 follow-up | **Sandbox onboarded + full verification day** | **Sandbox:** `sub-demo-sandbox` created (`a8572700-…`), providers registered, placed under `demo-sandbox`, tagged `environment=sandbox`+`schedule-profile=sandbox-default`, 4th budget added, W10 `vm-demo-w10` deployed (eastasia, `Standard_B2ts_v2`). Landing-zone + workloads applied from the stateful laptop; pre-checks run from this laptop (sub state, MG placement, ARG, providers, quota). Demo state split-brain documented → remote-backend scaffolding written (`docs/DEMO_STATE_BACKEND.md`), migration deferred. **Verification (all dry-run, pending reviewer confirmation):** S1/S12 morning start window (08:00 DBs → 08:30 VMs, correct ordering); S3 sub-tag inheritance (W10 `sandbox-default` from the subscription tag); S9 nested-MG exclusion (`excluded-scope` when sub moved into `demo-sandbox-excluded`, returns on restore); M4 past-due (app stopped 05:00→05:20, recovery 05:20:57, cadence resumed 05:30); N4 (W2 `RG-Demo-MixedCase` by Query 7); H2 both alerts fired live (cycle-exceptions 06:32:54, cycle-health 08:45:10); V4 CLI gotcha recorded (§6.2). **Code fixes (pushed to `main`):** DP-05 hidden-link `ignore_changes` (`be3cc45`); DP-06 `var.operator_object_id` (`a5dc27f`/`f043eea`); V3 skip-prefix `skipped:` (`4fafb3f`). DP-05 correction: plan is clean only after the next apply (documented). Tests: 161 passed / 8 skipped, ruff clean. **Remaining:** 17:30 stop window, V1/S18 (W12), C3 (W14), ≥1 business day dry-run, then go-live. |
