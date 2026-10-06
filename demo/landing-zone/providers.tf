@@ -42,7 +42,7 @@ terraform {
   #      to recreate everything — do not do that.
   #   4. Afterwards, on any machine: terraform init -reconfigure -backend-config=backend.hcl
   #
-  # backend "azurerm" {} # configured via backend.hcl
+  backend "azurerm" {} # configured via backend.hcl
 }
 
 provider "azurerm" {

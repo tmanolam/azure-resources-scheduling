@@ -3,12 +3,12 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-001 |
-| Version | 0.4 |
+| Version | 0.5 |
 | Related | [VERIFICATION.md](VERIFICATION.md), [REQUIREMENTS.md](REQUIREMENTS.md), [../README.md](../README.md) |
 | Created | 2026-10-04 |
 | Audience | Implementer (Kiro), platform team, presenter |
 | Budget | Azure credit of USD 1,000 in a fresh tenant |
-| Status | Plan — not started |
+| Status | In progress — landing zone, workloads, and scheduler deployed; state migrated to remote backend (2026-10-06) |
 
 ## 1. Purpose and outcome
 
@@ -302,7 +302,10 @@ Notes for Kiro:
 3. `terraform destroy` in `demo/workloads/` (optional components first: SQL MI, App Gateway, AKS).
 4. `terraform destroy` in `infra/scheduler` with `demo.tfvars`.
 5. `terraform destroy` in `demo/landing-zone/` (subscriptions return to Tenant Root).
-6. Delete the Terraform state storage account if it was demo-only.
+6. Delete the Terraform state storage account (`demosatfstate`) **last** — it
+   holds the state for all three roots (`infra/scheduler`, `demo/landing-zone`,
+   `demo/workloads`), so remove it only after every `terraform destroy` above
+   has completed (see [DEMO_STATE_BACKEND.md](DEMO_STATE_BACKEND.md)).
 7. Turn off **elevated access** (DM-04).
 8. Cancel the subscriptions when the tenant is no longer needed.
 
@@ -331,3 +334,4 @@ Notes for Kiro:
 | 0.2 | 2026-10-04 | No new profiles or product changes: removed the demo-window profile; scenarios now use the real `weekday-0830-1730` / `sandbox-default` windows plus override tags. Demo is logs-only (§8, saved queries). Budget re-planned for a USD 1,000 credit, with Plan B for single-subscription credit offers. Reconcile schedule kept at the 15-minute default. |
 | 0.3 | 2026-10-04 | Management groups and subscriptions renamed to match the target tenant (`demo-workload-np`, `demo-workload-prod`, `sub-demo-workload-*`). Single-subscription fallback (Plan B, DM-22) removed: all four subscriptions use the credit. Added §2.3 note on demo vs. target-tenant scoping and optional DM-15 (prod tag policy). |
 | 0.4 | 2026-10-04 | Added S18 (AKS node pool protection, verifies V1), explicit AKS node resource group name for W12, Phase B gate on V1, and a matching risk row. |
+| 0.5 | 2026-10-06 | Status updated to in-progress. §9 teardown step 6 clarified: state account holds all three roots after migration to remote backend ([DEMO_STATE_BACKEND.md](DEMO_STATE_BACKEND.md)). |

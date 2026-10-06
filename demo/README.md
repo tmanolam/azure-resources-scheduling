@@ -45,10 +45,12 @@ demo/
 ├── landing-zone/              # MGs, subscription placement + tags, budgets (DM-10–DM-14)
 │   ├── main.tf providers.tf variables.tf budgets.tf outputs.tf
 │   ├── render-demo-tfvars.sh  # generates infra/tenants/demo.tfvars from outputs
+│   ├── backend.hcl.example    # remote state template (DEMO_STATE_BACKEND.md)
 │   └── terraform.tfvars.example
 ├── workloads/                 # W1–W14 with toggles (DM-20–DM-23)
 │   ├── providers.tf variables.tf network.tf
 │   ├── workloads_vms_dev.tf workloads_db_vmss.tf workloads_vms_other.tf workloads_optional.tf
+│   ├── backend.hcl.example    # remote state template (DEMO_STATE_BACKEND.md)
 │   ├── outputs.tf terraform.tfvars.example
 ├── scheduler/
 │   └── demo.tfvars.example    # §2.3 values for infra/scheduler (DM-30)
@@ -71,8 +73,9 @@ Prereqs (manual) → landing-zone apply → workloads apply → scheduler deploy
    → collect evidence → stakeholder demo → teardown
 ```
 
-All Terraform here uses **local state** (demo-only). Run commands from the repo
-root unless noted. Sign in to the **demo tenant** first:
+All Terraform here uses a **remote azurerm backend** (`demosatfstate` — see
+[docs/DEMO_STATE_BACKEND.md](../docs/DEMO_STATE_BACKEND.md)). Run commands from
+the repo root unless noted. Sign in to the **demo tenant** first:
 
 ```bash
 az login --tenant <demo-tenant-id>
@@ -113,10 +116,11 @@ and sets budget alerts (DM-10–DM-14).
 ```bash
 cd demo/landing-zone
 cp terraform.tfvars.example terraform.tfvars
+cp backend.hcl.example backend.hcl   # remote state (demosatfstate); gitignored
 # edit terraform.tfvars: the four subscription IDs (sandbox may stay empty),
 # mg_prefix (default "demo"), budget_contact_emails
 
-terraform init
+terraform init -backend-config=backend.hcl
 terraform plan -out tfplan
 terraform apply tfplan
 cd ../..
@@ -142,10 +146,11 @@ Deploys W1–W11 (core) and, optionally, W12–W14. Keep the optional components
 ```bash
 cd demo/workloads
 cp terraform.tfvars.example terraform.tfvars
+cp backend.hcl.example backend.hcl   # remote state (demosatfstate); gitignored
 # edit: subscription IDs; sandbox id if it exists;
 # enable_aks/appgw/sqlmi = false for now
 
-terraform init
+terraform init -backend-config=backend.hcl
 terraform plan -out tfplan
 terraform apply tfplan
 cd ../..

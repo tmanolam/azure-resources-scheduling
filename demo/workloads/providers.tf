@@ -42,7 +42,7 @@ terraform {
   #      would start empty and plan to recreate all workloads — do not do that.
   #   4. Afterwards, on any machine: terraform init -reconfigure -backend-config=backend.hcl
   #
-  # backend "azurerm" {} # configured via backend.hcl
+  backend "azurerm" {} # configured via backend.hcl
 }
 
 # Non-production workloads (W1–W8, W12–W14).
