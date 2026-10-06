@@ -4,10 +4,10 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
 | Version | 0.5 (Large-tenant scaling requirements) |
-| Last updated | 2026-10-05 |
+| Last updated | 2026-10-06 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | Draft – only OI-01 (deployment-time configuration) remains open |
+| Status | v0.5 — demo tenant **live** since 2026-10-06 (see VERIFICATION.md). OI-01 is set per tenant at deployment; D-09 (scaling caps) awaits decision |
 
 ## Table of Contents
 
