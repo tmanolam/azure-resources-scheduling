@@ -34,6 +34,9 @@ reconcile_schedule  = "0 */15 * * * *"
 dry_run             = true
 max_actions_per_run = 200
 
+max_parallel_actions    = 10           # SC-01: parallel submissions per order group (FR-034)
+log_converged_decisions = true         # SC-04: set false above ~1,000 in-scope resources (NFR-011)
+
 log_analytics_workspace_id = ""
 alert_email_addresses      = ["cloud-platform@example.com"]
 

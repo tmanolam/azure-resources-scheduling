@@ -6,6 +6,15 @@
 // Note (§8): this estimates AVOIDED RUNNING HOURS, not a cost figure. Multiply
 // by the VM size's hourly rate in the presentation for a currency figure. Each
 // cycle = 15 min = 0.25 h; one decision record per resource per cycle.
+//
+// SC-04 / NFR-011: the PER-RESOURCE query below needs one decision record per
+// resource per cycle, so it is only complete when logConvergedDecisions=true
+// (small tenants). For LARGE tenants with logConvergedDecisions=false, the
+// already-converged (desired=Stopped, no-op) records are suppressed, so use the
+// SUMMARY-BASED query at the bottom, which reads the per-cycle desiredStopped
+// count and works in both modes.
+
+// --- Per-resource (logConvergedDecisions=true) ------------------------------
 traces
 | where timestamp > ago(30d)
 | where customDimensions["pwrsched.event"] == "pwrsched.decision"
@@ -17,3 +26,17 @@ traces
 | summarize stoppedCycles = count() by resourceId
 | extend estimatedHoursAvoided = stoppedCycles * 0.25
 | order by estimatedHoursAvoided desc
+
+// --- Summary-based (works in BOTH modes; use for large tenants) -------------
+// Sum the per-cycle desiredStopped count across live cycles. This counts
+// resource-cycles with desired=Stopped without needing per-resource records,
+// so it is unaffected by logConvergedDecisions. (Total avoided hours only; it
+// does not break down by resource.)
+//
+// traces
+// | where timestamp > ago(30d)
+// | where customDimensions["pwrsched.event"] == "pwrsched.summary"
+// | where tostring(customDimensions["pwrsched.dryRun"]) == "false"   // live only (if present on summary)
+// | extend desiredStopped = toint(customDimensions["pwrsched.desiredStopped"])
+// | summarize stoppedResourceCycles = sum(desiredStopped)
+// | extend estimatedHoursAvoided = stoppedResourceCycles * 0.25

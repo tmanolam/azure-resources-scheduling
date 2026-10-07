@@ -61,6 +61,14 @@ class Runtime:
     def max_actions_per_run(self) -> int:
         return self.config.settings.max_actions_per_run
 
+    @property
+    def max_parallel_actions(self) -> int:
+        return self.config.settings.max_parallel_actions
+
+    @property
+    def log_converged_decisions(self) -> bool:
+        return self.config.settings.log_converged_decisions
+
     def profile_provider(self, name: str) -> Optional[Profile]:
         return self.config.profile_provider(name)
 

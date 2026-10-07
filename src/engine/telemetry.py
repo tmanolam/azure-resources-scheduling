@@ -34,7 +34,7 @@ Every field is emitted under the ``pwrsched.`` prefix in ``customDimensions``:
     action, dryRun, result, error
 * ``pwrsched.summary`` — one per cycle:
     event, runId, evaluated, started, stopped, skipped, failed, capReached,
-    durationSeconds
+    durationSeconds, converged, desiredRunning, desiredStopped
 * ``pwrsched.capReached`` — emitted once when maxActionsPerRun truncates a cycle
   (OBS-005 keys on this event):
     event, runId, cap, deferred
@@ -129,8 +129,17 @@ def emit_summary(
     failed: int,
     cap_reached: bool,
     duration_seconds: float,
+    converged: int = 0,
+    desired_running: int = 0,
+    desired_stopped: int = 0,
 ) -> None:
-    """Emit one ``pwrsched.summary`` record per cycle (OBS-002, OBS-003)."""
+    """Emit one ``pwrsched.summary`` record per cycle (OBS-002, OBS-003).
+
+    From v0.7 (SC-04) it also carries ``converged``, ``desiredRunning`` and
+    ``desiredStopped`` so savings reports (hours avoided) work without the
+    per-resource ``already-converged`` decision records, which can be suppressed
+    for large tenants (``logConvergedDecisions=false``, NFR-011).
+    """
     attrs = _attrs(
         event=SUMMARY_EVENT,
         runId=run_id,
@@ -141,6 +150,9 @@ def emit_summary(
         failed=failed,
         capReached=cap_reached,
         durationSeconds=round(duration_seconds, 3),
+        converged=converged,
+        desiredRunning=desired_running,
+        desiredStopped=desired_stopped,
     )
     logger.info(SUMMARY_EVENT, extra=attrs)
 

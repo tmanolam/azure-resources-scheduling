@@ -26,6 +26,13 @@ reconcile_schedule  = "0 */15 * * * *"
 dry_run             = true
 max_actions_per_run = 200
 
+# Large-tenant scaling (SC-01/SC-04). Defaults are safe for small tenants.
+# max_parallel_actions: parallel start/stop submissions per order group (FR-034).
+# log_converged_decisions: set false above ~1,000 in-scope resources to control
+# Application Insights ingestion (NFR-011); summary counts still cover savings.
+max_parallel_actions    = 10
+log_converged_decisions = true
+
 log_analytics_workspace_id = ""
 alert_email_addresses      = ["cloud-platform@example.com"]
 

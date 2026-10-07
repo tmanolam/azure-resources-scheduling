@@ -3,11 +3,11 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.6 (Container handlers backlog) |
+| Version | 0.7 (Large-tenant scaling + D-09) |
 | Last updated | 2026-10-07 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | v0.6 — demo tenant **live** since 2026-10-06 (see VERIFICATION.md). OI-01 is set per tenant at deployment; D-09 (scaling caps) awaits decision |
+| Status | v0.7 — demo tenant **live** since 2026-10-06, Phase B complete 2026-10-07 (see VERIFICATION.md). OI-01 is set per tenant at deployment; **D-09 decided (single `maxActionsPerRun`, option A)** — large-tenant scaling workstream (§10.1, SC-01–SC-06) in progress |
 
 ## Table of Contents
 
@@ -651,6 +651,7 @@ Priority: Must
 | D-06 | 2026-10-03 | No production opt-in; production subscriptions are always excluded. |
 | D-07 | 2026-10-03 | Public holiday calendars deferred to phase 2. |
 | D-08 | 2026-10-03 | Azure SQL Database is out of scope. |
+| D-09 | 2026-10-07 | **Scaling cap: single `maxActionsPerRun` (option A).** Keep one combined per-cycle action cap rather than splitting into `maxStopsPerRun`/`maxStartsPerRun` (option B) or adding a percentage floor (option C). The cap is a safety brake against mass mis-tagging, not a scheduling mechanism, and is sized from the measured peak of legitimate transitions (§10.1, SC-03, ≈ peak × 1.2). Option C is explicitly rejected because the scheduler's normal behaviour is to stop almost the whole in-scope estate in one cycle (17:30 for the standard profile), so a "never stop more than X%" floor would block legitimate daily stops. Option B remains a possible later refinement if operations show a single cap is insufficient. Unblocks SC-01, SC-03, SC-05. |
 
 ## 18. Glossary
 
@@ -677,3 +678,4 @@ Priority: Must
 | 0.6 | 2026-10-07 | Container handlers backlog: `container-apps` and `container-instances` added to the §8.1 matrix (Should, backlog); HR-009 (Container Apps) and HR-010 (Container Instances, long-running groups only); new §8.3 backlog CH-01–CH-03 with acceptance criteria; §11.1 role actions for the new handlers; `appservice` row notes that stopping an app does not reduce cost. |
 | 0.6.1 | 2026-10-07 | Added FR-029 (production opt-in design, Won't — only if D-06 is superseded) and a BR-003 note against relabelling the `environment` tag. Status line updated to v0.6. |
 | 0.6.2 | 2026-10-07 | §11.1: added `virtualMachineScaleSets/virtualMachines/instanceView/read` (used by the vmss per-instance fallback; found by the new role/SDK consistency test). |
+| 0.7 | 2026-10-07 | Decision **D-09** (single `maxActionsPerRun`, option A) recorded in §17.1; status line and version updated. Starts the large-tenant scaling workstream (§10.1 SC-01–SC-06): parallel action submission (`maxParallelActions`, FR-034), raised function timeout (SC-02), telemetry-volume control (`logConvergedDecisions`, NFR-011) with new summary counts, cap sizing guidance, load test and large-tenant operating guidance. |

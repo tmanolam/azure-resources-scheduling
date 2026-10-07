@@ -122,15 +122,26 @@ def test_emit_decision_fields(captured):
 
 def test_emit_summary_fields(captured):
     telemetry.emit_summary(run_id="r1", evaluated=5, started=2, stopped=1,
-                           skipped=1, failed=1, cap_reached=False, duration_seconds=0.123)
+                           skipped=1, failed=1, cap_reached=False, duration_seconds=0.123,
+                           converged=3, desired_running=2, desired_stopped=3)
     d = _dims(captured.records, telemetry.SUMMARY_EVENT)
     assert len(d) == 1
     cd = d[0]
     for key in ["event", "runId", "evaluated", "started", "stopped", "skipped",
-                "failed", "capReached", "durationSeconds"]:
+                "failed", "capReached", "durationSeconds",
+                "converged", "desiredRunning", "desiredStopped"]:
         assert key in cd
     assert cd["evaluated"] == 5 and cd["failed"] == 1
+    assert cd["converged"] == 3 and cd["desiredRunning"] == 2 and cd["desiredStopped"] == 3
     assert cd["capReached"] == "false"  # N6: booleans as lowercase strings
+
+
+def test_emit_summary_scaling_fields_default_zero(captured):
+    # SC-04 fields are optional and default to 0 for back-compatible callers.
+    telemetry.emit_summary(run_id="r1", evaluated=1, started=0, stopped=0,
+                           skipped=0, failed=0, cap_reached=False, duration_seconds=0.0)
+    cd = _dims(captured.records, telemetry.SUMMARY_EVENT)[0]
+    assert cd["converged"] == 0 and cd["desiredRunning"] == 0 and cd["desiredStopped"] == 0
 
 
 def test_emit_cap_reached_fields(captured):

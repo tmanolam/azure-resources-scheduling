@@ -99,6 +99,8 @@ def _run_cycle(run_id: str) -> None:
         config=ReconcileConfig(
             dry_run=runtime.dry_run,
             max_actions_per_run=runtime.max_actions_per_run,
+            max_parallel_actions=runtime.max_parallel_actions,
+            log_converged_decisions=runtime.log_converged_decisions,
         ),
     )
     logging.info(

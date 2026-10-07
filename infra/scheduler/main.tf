@@ -88,12 +88,14 @@ module "app_config" {
   public_network_access = var.enable_private_networking ? "Disabled" : "Enabled"
 
   settings = {
-    enabled_resource_types = var.enabled_resource_types
-    include_scopes         = var.in_scope_management_group_ids
-    exclude_scopes         = var.excluded_scope_ids
-    dry_run                = var.dry_run
-    max_actions_per_run    = var.max_actions_per_run
-    reconcile_schedule     = var.reconcile_schedule
+    enabled_resource_types  = var.enabled_resource_types
+    include_scopes          = var.in_scope_management_group_ids
+    exclude_scopes          = var.excluded_scope_ids
+    dry_run                 = var.dry_run
+    max_actions_per_run     = var.max_actions_per_run
+    max_parallel_actions    = var.max_parallel_actions
+    log_converged_decisions = var.log_converged_decisions
+    reconcile_schedule      = var.reconcile_schedule
   }
 
   tags = var.tags

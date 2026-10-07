@@ -30,12 +30,14 @@ variable "config_root" {
 
 variable "settings" {
   type = object({
-    enabled_resource_types = list(string)
-    include_scopes         = list(string)
-    exclude_scopes         = list(string)
-    dry_run                = bool
-    max_actions_per_run    = number
-    reconcile_schedule     = string
+    enabled_resource_types  = list(string)
+    include_scopes          = list(string)
+    exclude_scopes          = list(string)
+    dry_run                 = bool
+    max_actions_per_run     = number
+    max_parallel_actions    = number
+    log_converged_decisions = bool
+    reconcile_schedule      = string
   })
   description = "Global settings written as App Configuration keys. This is the single source of truth for settings (from terraform.tfvars); M6."
 }

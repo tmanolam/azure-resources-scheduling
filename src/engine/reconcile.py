@@ -65,6 +65,16 @@ class ReconcileConfig:
     # resources without a Resource Graph power state (M1/N7). See
     # ``_prefetch_fallback_states``.
     max_parallel_arm_calls: int = 10
+    # SC-01 (FR-034): bounds the ThreadPoolExecutor that *submits* start/stop
+    # operations. Submission is per order group with a barrier between groups
+    # (all order-1 submissions finish before order-2 begins), so dependency
+    # ordering is preserved while a large cap clears within the function timeout.
+    max_parallel_actions: int = 10
+    # SC-04 (NFR-011): when False, per-resource ``already-converged`` decision
+    # records are not emitted (only counted in the summary), to keep telemetry
+    # volume proportional to the number of actions, not resources. Recommended
+    # False above ~1,000 in-scope resources. Default True = unchanged behaviour.
+    log_converged_decisions: bool = True
 
 
 @dataclass(frozen=True)
@@ -93,6 +103,12 @@ class CycleSummary:
     failed: int = 0
     cap_reached: bool = False
     duration_seconds: float = 0.0
+    # SC-04 (OBS-002, NFR-011): aggregate counts so savings reporting (hours
+    # avoided) works even when per-resource ``already-converged`` decision
+    # records are suppressed (``log_converged_decisions=False``).
+    converged: int = 0
+    desired_running: int = 0
+    desired_stopped: int = 0
     decisions: list[PlannedAction] = field(default_factory=list)
 
 
@@ -140,7 +156,7 @@ def _read_actual_state(resource: ResourceRecord, handler: "Handler") -> ActualSt
 
     When discovery populated ``resource.power_state`` (the common case), no
     per-resource ARM call is made — this is what keeps a large cycle within the
-    5-minute budget (NFR-002). Only when it is absent do we fall back to the
+    10-minute budget (NFR-002; 12-minute function timeout). Only when it is absent do we fall back to the
     handler's ARM ``get_state``. The handler's ``start``/``stop`` still issues
     the authoritative ARM operation, so a slightly stale read self-heals next
     cycle (FR-004).
@@ -174,7 +190,7 @@ def _prefetch_fallback_states(
     (:func:`_needs_fallback_read`) need an ARM ``get_state`` call. Those reads
     are independent and I/O-bound, so they run in a bounded ``ThreadPoolExecutor``
     sized by ``max_parallel_arm_calls`` (NFR-005) instead of sequentially, which
-    keeps a large cycle within the 5-minute budget (NFR-002).
+    keeps a large cycle within the 10-minute budget (NFR-002; 12-minute function timeout).
 
     Returns two maps for the fallback resources only:
 
@@ -239,7 +255,7 @@ def plan_actions(
     Resources whose actual state is not available from Resource Graph need a
     per-resource ARM ``get_state`` read; those reads are performed up front in a
     bounded thread pool sized by ``max_parallel_arm_calls`` (N7, NFR-005) so a
-    large cycle stays within the 5-minute budget (NFR-002).
+    large cycle stays within the 10-minute budget (NFR-002; 12-minute function timeout).
     """
     planned: list[PlannedAction] = []
 
@@ -334,6 +350,21 @@ def execute_actions(
     and logged. Submission is asynchronous (FR-005): handlers must not wait for
     completion.
 
+    Parallel submission (SC-01, FR-034): outside dry-run the ordered actions are
+    submitted through a bounded ``ThreadPoolExecutor`` (``max_parallel_actions``)
+    **per order group**, with a barrier between groups — all actions in one
+    ``(ActionType, schedule-order)`` group finish submitting before the next
+    group starts. ``order_and_limit_actions`` already produces starts ascending
+    by order then stops descending by order and applies the single
+    ``maxActionsPerRun`` cap (D-09), so grouping on consecutive
+    ``(action, order)`` preserves the dependency sequence (databases start before
+    apps; apps stop before databases) while parallelising within a group. This
+    lets a cycle submit the capped number of actions well within the function
+    timeout (NFR-002). Per-action failures stay isolated.
+
+    Dry-run keeps the simple sequential path (no ARM calls, so there is nothing
+    to parallelise and the log order is stable).
+
     Throttling (NFR-005): HTTP 429 is retried by the Azure SDK's own retry
     policy (azure-core), honouring the ``Retry-After`` header — see
     ``runtime.default_client_factories`` which configures ``retry_total`` /
@@ -341,24 +372,86 @@ def execute_actions(
     second back-off mechanism (finding M3). ``sleep`` is retained only for
     backward-compatible call sites and is unused.
     """
-    for action in ordering.actions:
-        handler = handlers.get(action.resource.handler_key)
-        if handler is None:
-            summary.skipped += 1
-            summary.decisions.append(replace(action, result="skipped-no-handler"))
-            continue
-
-        if config.dry_run:
+    if config.dry_run:
+        for action in ordering.actions:
+            handler = handlers.get(action.resource.handler_key)
+            if handler is None:
+                summary.skipped += 1
+                summary.decisions.append(replace(action, result="skipped-no-handler"))
+                continue
             logger.info(
                 "pwrsched.decision: DRY-RUN would %s %s (%s)",
                 action.action.value, action.resource.resource_id, action.reason,
             )
             _count_success(summary, action.action)
             summary.decisions.append(replace(action, result="dry-run"))
-            continue
+        _record_skipped(ordering, summary)
+        return
 
-        outcome = _invoke_handler(handler, action)
-        if outcome.submitted:
+    # Live: submit per order group (barrier between groups), bounded concurrency.
+    workers = max(1, int(config.max_parallel_actions or 1))
+    for group in _group_by_order(ordering.actions):
+        _submit_group(group, handlers=handlers, summary=summary, workers=workers)
+
+    _record_skipped(ordering, summary)
+
+
+def _group_by_order(actions: Sequence[PlannedAction]) -> list[list[PlannedAction]]:
+    """Split the ordered action list into consecutive ``(action, order)`` groups.
+
+    ``order_and_limit_actions`` emits starts (ascending order) then stops
+    (descending order); consecutive actions sharing the same ``(ActionType,
+    order)`` form one group that may be submitted in parallel. A change in
+    either the action type or the order number starts a new group, which the
+    caller runs only after the previous group's submissions complete — the
+    dependency barrier (FR-006).
+    """
+    groups: list[list[PlannedAction]] = []
+    current: list[PlannedAction] = []
+    key = None
+    for a in actions:
+        a_key = (a.action, a.order)
+        if a_key != key:
+            if current:
+                groups.append(current)
+            current = [a]
+            key = a_key
+        else:
+            current.append(a)
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _submit_group(
+    group: Sequence[PlannedAction],
+    *,
+    handlers: Mapping[str, Handler],
+    summary: CycleSummary,
+    workers: int,
+) -> None:
+    """Submit one order group concurrently and fold the outcomes into the summary.
+
+    Results are collected and applied to ``summary`` on the calling thread, so
+    the mutable ``CycleSummary`` is never touched from worker threads. A single
+    action's failure is isolated — it does not stop the rest of the group.
+    """
+    pool_workers = max(1, min(workers, len(group)))
+
+    def _run(action: PlannedAction) -> tuple[PlannedAction, Optional[InvokeOutcome]]:
+        handler = handlers.get(action.resource.handler_key)
+        if handler is None:
+            return action, None
+        return action, _invoke_handler(handler, action)
+
+    with ThreadPoolExecutor(max_workers=pool_workers, thread_name_prefix="arm-submit") as pool:
+        results = list(pool.map(_run, group))
+
+    for action, outcome in results:
+        if outcome is None:
+            summary.skipped += 1
+            summary.decisions.append(replace(action, result="skipped-no-handler"))
+        elif outcome.submitted:
             _count_success(summary, action.action)
             summary.decisions.append(replace(action, result="submitted"))
         elif outcome.skip_reason is not None:
@@ -374,7 +467,9 @@ def execute_actions(
             summary.failed += 1
             summary.decisions.append(replace(action, result="failed"))
 
-    # Skipped (deny-listed / capped) items are still recorded for the audit log.
+
+def _record_skipped(ordering: OrderingResult, summary: CycleSummary) -> None:
+    """Record safety-skipped (deny-listed / capped) items for the audit log."""
     for action in ordering.skipped:
         summary.decisions.append(replace(action, result=action.reason or "skipped"))
     summary.skipped += len(ordering.skipped)
@@ -463,13 +558,35 @@ def run_reconcile(
 
     summary.duration_seconds = time.monotonic() - start_time
 
+    # --- Summary aggregate counts (SC-04, OBS-002) ---------------------------
+    # Count desired-state and converged totals across ALL evaluated resources so
+    # savings reporting works even when per-resource already-converged decision
+    # records are suppressed (log_converged_decisions=False). "converged" counts
+    # the no-op (already-converged) decisions; desiredRunning/desiredStopped
+    # count by computed desired state regardless of action.
+    for p in planned:
+        if p.desired_state == DesiredState.RUNNING.value:
+            summary.desired_running += 1
+        elif p.desired_state == DesiredState.STOPPED.value:
+            summary.desired_stopped += 1
+        if p.action is ActionType.NONE and p.reason == "already-converged":
+            summary.converged += 1
+
     # --- Telemetry (OBS-001/002/005) ----------------------------------------
     # One decision record per evaluated resource: the executed/skipped set is in
     # summary.decisions (with a result); the non-actionable set is logged with
-    # its reason as the result.
+    # its reason as the result. SC-04/NFR-011: when log_converged_decisions is
+    # False, already-converged no-ops are suppressed (counted in the summary
+    # only) so telemetry volume scales with actions, not resources. Every other
+    # result — start, stop, skipped, excluded, failed, production-excluded — is
+    # always emitted (OBS-001).
     for action in summary.decisions:
+        if _is_suppressible_converged(action, config):
+            continue
         telemetry.emit_decision(action, run_id=run_id, dry_run=config.dry_run)
     for action in non_actionable:
+        if _is_suppressible_converged(action, config):
+            continue
         telemetry.emit_decision(action, run_id=run_id, dry_run=config.dry_run)
 
     if summary.cap_reached:
@@ -485,11 +602,25 @@ def run_reconcile(
         failed=summary.failed,
         cap_reached=summary.cap_reached,
         duration_seconds=summary.duration_seconds,
+        converged=summary.converged,
+        desired_running=summary.desired_running,
+        desired_stopped=summary.desired_stopped,
     )
 
     logger.info(
-        "pwrsched.summary: run=%s evaluated=%d started=%d stopped=%d skipped=%d failed=%d cap=%s dur=%.3fs",
+        "pwrsched.summary: run=%s evaluated=%d started=%d stopped=%d skipped=%d "
+        "failed=%d converged=%d cap=%s dur=%.3fs",
         summary.run_id, summary.evaluated, summary.started, summary.stopped,
-        summary.skipped, summary.failed, summary.cap_reached, summary.duration_seconds,
+        summary.skipped, summary.failed, summary.converged, summary.cap_reached,
+        summary.duration_seconds,
     )
     return summary
+
+
+def _is_suppressible_converged(action: PlannedAction, config: ReconcileConfig) -> bool:
+    """True when this is an ``already-converged`` no-op and logging them is off (SC-04)."""
+    return (
+        not config.log_converged_decisions
+        and action.action is ActionType.NONE
+        and action.reason == "already-converged"
+    )

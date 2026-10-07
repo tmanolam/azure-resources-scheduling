@@ -55,6 +55,11 @@ locals {
     "pwrsched:scopes:exclude"   = jsonencode(var.settings.exclude_scopes)
     "pwrsched:dryRun"           = tostring(var.settings.dry_run)
     "pwrsched:maxActionsPerRun" = tostring(var.settings.max_actions_per_run)
+    # SC-01 (FR-034): bound on parallel start/stop submissions per order group.
+    "pwrsched:maxParallelActions" = tostring(var.settings.max_parallel_actions)
+    # SC-04 (NFR-011): log per-resource already-converged decision records.
+    # Recommend false above ~1,000 in-scope resources to control ingestion.
+    "pwrsched:logConvergedDecisions" = tostring(var.settings.log_converged_decisions)
     # Informational only: the timer schedule is bound from the RECONCILE_SCHEDULE
     # app setting via a binding expression, not from this key (L3). Kept so the
     # schedule is visible/auditable alongside the other settings.

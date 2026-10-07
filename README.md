@@ -2,7 +2,7 @@
 
 > Tag-driven start/stop scheduling for Azure resources (VM, VMSS, AKS, PostgreSQL/MySQL Flexible Server, SQL MI, Application Gateway), running as a timer-triggered Azure Function and deployed with Terraform.
 
-**Last updated:** 2026-10-03 (v0.4 – single tenant-wide deployment) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) · **Verification:** [docs/VERIFICATION.md](docs/VERIFICATION.md)
+**Last updated:** 2026-10-07 (v0.7 – large-tenant scaling: parallel submission, telemetry volume control, cap sizing) · **Requirements:** [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) · **Verification:** [docs/VERIFICATION.md](docs/VERIFICATION.md)
 
 ## Table of Contents
 
@@ -20,6 +20,7 @@
   - [Step 7 – Go live](#step-7--go-live)
 - [Configuration Reference](#configuration-reference)
 - [Multiple Tenants](#multiple-tenants)
+- [Large tenants](#large-tenants)
 - [Day-2 Operations](#day-2-operations)
 - [Rollback and Removal](#rollback-and-removal)
 - [Troubleshooting](#troubleshooting)
@@ -457,16 +458,86 @@ The file name (without `.json`) is the profile name used in the `schedule-profil
 | `reconcile_schedule` | NCRONTAB timer expression (UTC) | `0 */15 * * * *` | |
 | `scheduler_enabled` | Set `false` to disable the timer function | `true` | |
 | `dry_run` | Log only, no actions | `true` | |
-| `max_actions_per_run` | Safety cap per cycle | `200` | |
+| `max_actions_per_run` | Safety cap per cycle; single combined start/stop cap (D-09). Size from the measured peak (see [Large tenants](#large-tenants)) | `200` | |
+| `max_parallel_actions` | Parallel start/stop submissions per order group (FR-034); submission is parallel within an order group with a barrier between groups | `10` | |
+| `log_converged_decisions` | Emit a per-resource decision record for already-converged (no-op) resources; set `false` above ~1,000 resources to control log ingestion (NFR-011) | `true` | |
 | `log_analytics_workspace_id` | Existing workspace; creates one if empty | `""` | |
 | `enable_private_networking` | Private endpoints + VNet integration | `false` | |
 | `integration_subnet_id` | Subnet for VNet integration (delegated to `Microsoft.App/environments`) | `null` | when private |
 | `alert_email_addresses` | Alert recipients | `[]` | |
 | `tags` | Standard resource tags | `{}` | ✓ |
 
-## Day-2 Operations
+## Large tenants
 
-All configuration changes follow the same pattern: edit files, then `terraform plan` and `terraform apply` from `infra/scheduler`. No code redeploy is needed.
+The defaults are tuned for small-to-medium tenants. For large estates (hundreds
+to thousands of in-scope resources, up to the NFR-002 target of 5,000), apply the
+guidance below. All of it is configuration — no code change.
+
+### Size the safety cap from the measured peak
+
+`max_actions_per_run` is a single combined start/stop cap (decision **D-09**): a
+**safety brake** against mass mis-tagging, not a throughput knob. Size it from
+the busiest real cycle, not guesswork. During the dry-run week, run this query
+(the peak is almost always the 17:30 stop, when nearly everything transitions at
+once) against the backing Log Analytics workspace:
+
+```kusto
+AppTraces
+| where Properties["pwrsched.event"] == "pwrsched.decision"
+| where tostring(Properties["pwrsched.action"]) in ("start", "stop")
+| summarize actions = count()
+    by runId = tostring(Properties["pwrsched.runId"]), bin(TimeGenerated, 15m)
+| top 5 by actions desc
+```
+
+Set `max_actions_per_run ≈ peak × 1.2` (headroom for growth). Keep it as a brake:
+if a cycle ever hits the cap in normal operation, investigate mis-tagging before
+raising it. A `pwrsched.capReached` alert (OBS-005) fires when the cap truncates
+a cycle.
+
+### Submission throughput and the function timeout
+
+Within a cycle, start/stop operations are **submitted in parallel** through a
+bounded pool (`max_parallel_actions`, default 10), per order group with a barrier
+between groups — so dependency ordering (databases before apps on start, the
+reverse on stop) is preserved while the capped set is submitted quickly
+(FR-034). Submission is asynchronous (the next cycle confirms completion), so the
+per-action cost is one ARM call, not the minutes a start/stop takes to finish.
+
+The whole cycle must finish inside `functionTimeout` (`src/host.json`, **12
+minutes**) and before the next cycle. **Rule: the function timeout must be less
+than the `reconcile_schedule` interval** (12 min < the default 15 min). If you
+shorten the interval, lower the timeout to match. Raise `max_parallel_actions`
+only if you also confirm the subscription's ARM write limits tolerate it (see
+below); 10–20 is a sensible range.
+
+### Control telemetry ingestion
+
+By default every evaluated resource emits one decision record per cycle. At 5,000
+resources × 96 cycles/day that is ~480,000 records/day (~hundreds of MB). Above
+~1,000 in-scope resources, set `log_converged_decisions = false`: the scheduler
+then **suppresses the per-resource `already-converged` no-op records** and relies
+on the per-cycle summary, which carries `converged`, `desiredRunning` and
+`desiredStopped` counts (NFR-011, OBS-002). All actionable results — start, stop,
+skipped, excluded, failed, production-excluded — are still logged individually.
+The savings/hours-saved reporting works from the summary counts either way.
+Review Application Insights ingestion after the first week and set a Log
+Analytics daily cap if needed. The **summary workbook**
+(`infra/workbooks/pwrsched-summary.workbook.json`) is built for this mode — it
+reads the per-cycle summary record, so it stays fast with thousands of resources.
+
+### Lower the peak itself
+
+- **Stagger profiles by business unit** so the whole estate does not transition
+  in one cycle — e.g. `weekday-0800-1700`, `weekday-0815-1715`,
+  `weekday-0830-1730`, `weekday-0845-1745`. This is the most effective lever: it
+  cuts the per-cycle peak directly, which lowers the required cap and the
+  submission time.
+- **ARM write limits are per subscription.** A very large single subscription
+  transitions more slowly regardless of `max_parallel_actions`; spreading
+  workloads across subscriptions (or staggering their profiles) helps.
+
+
 
 ### Change a schedule
 

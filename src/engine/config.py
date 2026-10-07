@@ -43,6 +43,8 @@ KEY_SCOPES_INCLUDE = "pwrsched:scopes:include"
 KEY_SCOPES_EXCLUDE = "pwrsched:scopes:exclude"
 KEY_DRY_RUN = "pwrsched:dryRun"
 KEY_MAX_ACTIONS = "pwrsched:maxActionsPerRun"
+KEY_MAX_PARALLEL = "pwrsched:maxParallelActions"
+KEY_LOG_CONVERGED = "pwrsched:logConvergedDecisions"
 KEY_SCHEDULE = "pwrsched:reconcileSchedule"
 PROFILE_PREFIX = "pwrsched:profiles:"
 
@@ -56,6 +58,10 @@ class Settings:
     exclude_scopes: list[str] = field(default_factory=list)
     dry_run: bool = True
     max_actions_per_run: int = 200
+    # SC-01 (FR-034): bound on parallel start/stop submissions per order group.
+    max_parallel_actions: int = 10
+    # SC-04 (NFR-011): emit per-resource already-converged decision records.
+    log_converged_decisions: bool = True
     reconcile_schedule: str = "0 */15 * * * *"
 
 
@@ -107,6 +113,8 @@ def parse_config(kv: Mapping[str, str]) -> LoadedConfig:
         exclude_scopes=_as_list(kv.get(KEY_SCOPES_EXCLUDE)),
         dry_run=_as_bool(kv.get(KEY_DRY_RUN), default=True),
         max_actions_per_run=_as_int(kv.get(KEY_MAX_ACTIONS), default=200),
+        max_parallel_actions=_as_int(kv.get(KEY_MAX_PARALLEL), default=10),
+        log_converged_decisions=_as_bool(kv.get(KEY_LOG_CONVERGED), default=True),
         reconcile_schedule=kv.get(KEY_SCHEDULE) or "0 */15 * * * *",
     )
 

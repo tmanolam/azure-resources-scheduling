@@ -62,7 +62,24 @@ variable "dry_run" {
 variable "max_actions_per_run" {
   type        = number
   default     = 200
-  description = "Safety cap per cycle (FR-031)."
+  description = "Safety cap per cycle (FR-031). Single combined start/stop cap (D-09). Size from the measured peak transition (SC-03, ~= peak x 1.2)."
+}
+
+variable "max_parallel_actions" {
+  type        = number
+  default     = 10
+  description = "Bound on parallel start/stop submissions per order group (SC-01, FR-034). Submission is parallel within an order group with a barrier between groups, so dependency ordering is preserved."
+
+  validation {
+    condition     = var.max_parallel_actions >= 1 && var.max_parallel_actions <= 100
+    error_message = "max_parallel_actions must be between 1 and 100 (10-20 is a sensible range; very high values risk per-subscription ARM write throttling)."
+  }
+}
+
+variable "log_converged_decisions" {
+  type        = bool
+  default     = true
+  description = "Emit a per-resource decision record for already-converged (no-op) resources (SC-04, NFR-011). Set false above ~1,000 in-scope resources to keep Application Insights ingestion proportional to actions, not resources; summary counts still carry converged/desiredRunning/desiredStopped."
 }
 
 variable "log_analytics_workspace_id" {

@@ -89,6 +89,30 @@ def test_parse_config_bad_int_falls_back():
     assert parse_config(kv).settings.max_actions_per_run == 200
 
 
+# --- SC-01 / SC-04 scaling settings -----------------------------------------
+
+def test_parse_config_scaling_keys():
+    kv = _kv()
+    kv["pwrsched:maxParallelActions"] = "25"
+    kv["pwrsched:logConvergedDecisions"] = "false"
+    s = parse_config(kv).settings
+    assert s.max_parallel_actions == 25
+    assert s.log_converged_decisions is False
+
+
+def test_parse_config_scaling_defaults():
+    # Absent keys fall back to safe small-tenant defaults (unchanged behaviour).
+    s = parse_config(_kv()).settings
+    assert s.max_parallel_actions == 10
+    assert s.log_converged_decisions is True
+
+
+def test_parse_config_bad_max_parallel_falls_back():
+    kv = _kv()
+    kv["pwrsched:maxParallelActions"] = "nonsense"
+    assert parse_config(kv).settings.max_parallel_actions == 10
+
+
 # --- load_from_app_configuration (injected list_fn) --------------------------
 
 def test_load_from_app_configuration_with_fake_client():
@@ -128,6 +152,8 @@ def test_build_runtime_assembles_handlers_and_discover():
     assert set(rt.handlers) == {"vm", "aks"}
     assert rt.dry_run is True
     assert rt.max_actions_per_run == 200
+    assert rt.max_parallel_actions == 10        # SC-01 default surfaced
+    assert rt.log_converged_decisions is True   # SC-04 default surfaced
     assert rt.profile_provider("weekday-0830-1730") is not None
 
     discovered = rt.discover()

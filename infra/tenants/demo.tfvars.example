@@ -33,6 +33,9 @@ reconcile_schedule  = "0 */15 * * * *" # default; needed for the T-602 count che
 dry_run             = true             # Phase A; flip to false for Phase B (T-603)
 max_actions_per_run = 200              # temporarily 2 for scenario S14
 
+max_parallel_actions    = 10           # SC-01: parallel submissions per order group
+log_converged_decisions = true         # SC-04: false above ~1,000 resources
+
 log_analytics_workspace_id = ""
 alert_email_addresses      = ["<your-demo-alert-email>"]
 

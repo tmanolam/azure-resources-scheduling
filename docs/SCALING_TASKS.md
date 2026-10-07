@@ -21,35 +21,23 @@
 
 ---
 
-## Open design decision (gate for SC-01/SC-03/SC-05)
+## Design decision (settled) — gate for SC-01/SC-03/SC-05
 
-> **D-09 (proposed): single vs. separate action caps.**
+> **D-09 (DECIDED 2026-10-07): option A — single `maxActionsPerRun`.**
 >
-> SC-03 asks: should the cap remain a single `maxActionsPerRun`, or split into
-> `maxStopsPerRun` / `maxStartsPerRun`? Mass stops are the risky direction
-> (accidentally shutting down everything); mass starts are less dangerous (worst
-> case: resources start too early and run a few extra hours).
+> Recorded in [REQUIREMENTS §17.1](REQUIREMENTS.md) as D-09. Keep one combined
+> per-cycle action cap; **do not** split into `maxStopsPerRun`/`maxStartsPerRun`
+> (option B) or add a percentage floor (option C). The cap stays a safety brake
+> against mass mis-tagging, sized from the measured peak (SC-03, ≈ peak × 1.2).
+> Option C is rejected because the scheduler normally stops almost the whole
+> in-scope estate in one cycle (17:30 for the standard profile), so a "never stop
+> more than X%" floor would block legitimate daily stops. Option B remains a
+> possible later refinement if a single cap proves insufficient in operation.
 >
-> **Options:**
-> - **A.** Keep single `maxActionsPerRun` (simpler; the cap is a safety brake,
->   not a scheduling mechanism).
-> - **B.** Separate caps (finer control; a low `maxStopsPerRun` limits blast
->   radius while a higher `maxStartsPerRun` lets resources start on time).
-> - **C.** Single cap + a hard floor (e.g. never stop more than 50% of in-scope
->   in one cycle, regardless of cap).
->
-> **Recommendation:** start with **A** (the current model), sized per SC-03's
-> peak measurement. Add B/C only if operational experience shows a single cap is
-> insufficient. Record the decision in REQUIREMENTS §17.1 as D-09.
->
-> **Reviewer recommendation (2026-10-06): option A.** Keep a single
-> `maxActionsPerRun`, sized from the measured peak (SC-03). **Do not adopt
-> option C:** this scheduler's normal behaviour is to stop almost every in-scope
-> resource in the same cycle (17:30 for the standard profile), so a "never stop
-> more than 50% in one cycle" floor would block legitimate daily stops and
-> defer half the estate to later cycles. Option B (separate stop/start caps)
-> remains a possible later refinement if operations show a need. **Decision
-> pending the product owner**; once made, record it as D-09 in REQUIREMENTS §17.1.
+> **Consequences for the tasks below:** SC-01 applies the single cap in ordering
+> **before** parallel submission (unchanged cap semantics); SC-03 is cap-sizing
+> **guidance only** (no new cap variables); SC-05 asserts the single cap defers
+> the excess. SC-01, SC-03 and SC-05 are therefore unblocked.
 
 ---
 
@@ -88,11 +76,11 @@ settling.
   (N7 fix) already uses a bounded `ThreadPoolExecutor` for state reads.
 - **Depends on:** D-09 (affects whether the cap is applied before or per direction)
 - **Tests:**
-  - [ ] Concurrency never exceeds the bound (same mock pattern as N7's test).
-  - [ ] Order groups are respected: order-1 finishes before order-2 begins.
-  - [ ] One failure in a group doesn't stop the others.
-  - [ ] Dry-run path is unchanged (no parallel overhead).
-- **Status:** ⬜ Not started
+  - [x] Concurrency never exceeds the bound (same mock pattern as N7's test).
+  - [x] Order groups are respected: order-1 finishes before order-2 begins.
+  - [x] One failure in a group doesn't stop the others.
+  - [x] Dry-run path is unchanged (no parallel overhead).
+- **Status:** ✅ Done (2026-10-07)
 
 ### SC-02 — Function time budget (M)
 
@@ -103,9 +91,9 @@ settling.
 - **Where:** `src/host.json`, `README.md` (Troubleshooting or Configuration).
 - **Depends on:** nothing
 - **Tests:**
-  - [ ] `host.json` parses.
-  - [ ] README mentions the timeout < interval rule.
-- **Status:** ⬜ Not started
+  - [x] `host.json` parses.
+  - [x] README mentions the timeout < interval rule.
+- **Status:** ✅ Done (2026-10-07)
 - **Effort:** trivial (one-line + one paragraph)
 
 ### SC-03 — Cap design and sizing (S)
@@ -122,9 +110,9 @@ settling.
   `src/engine/ordering.py` + `infra/modules/app_config`.
 - **Depends on:** D-09
 - **Tests:**
-  - [ ] (If separate caps) Unit tests for each cap; OBS-005 alert still fires.
-  - [ ] (If single cap) sizing guidance is documented.
-- **Status:** ⬜ Not started — **blocked on D-09**
+  - [x] (If separate caps) Unit tests for each cap; OBS-005 alert still fires.
+  - [x] (If single cap) sizing guidance is documented.
+- **Status:** ✅ Done (2026-10-07) — D-09 option A; cap-sizing **guidance only** (README 'Large tenants' + the peak query), no new cap variables.
 
 ### SC-04 — Telemetry volume (M)
 
@@ -148,12 +136,12 @@ settling.
   `infra/workbooks/pwrsched-day2-operations.workbook.json`, README.
 - **Depends on:** nothing (can start immediately)
 - **Tests:**
-  - [ ] `logConvergedDecisions=false`: converged decisions suppressed, all others
+  - [x] `logConvergedDecisions=false`: converged decisions suppressed, all others
     still logged.
-  - [ ] `logConvergedDecisions=true` (default): behaviour unchanged.
-  - [ ] Summary carries `converged`, `desiredRunning`, `desiredStopped` in both modes.
-  - [ ] Q-G returns the same total either way (dry-run comparison in the test).
-- **Status:** ⬜ Not started
+  - [x] `logConvergedDecisions=true` (default): behaviour unchanged.
+  - [x] Summary carries `converged`, `desiredRunning`, `desiredStopped` in both modes.
+  - [x] Q-G returns the same total either way (dry-run comparison in the test).
+- **Status:** ✅ Done (2026-10-07)
 
 ### SC-05 — Load test (M)
 
@@ -171,11 +159,11 @@ settling.
 - **Where:** `tests/test_scaling.py` (or `tests/load/`)
 - **Depends on:** SC-01, SC-02, SC-04 (tests the combined effect)
 - **Tests:**
-  - [ ] NFR-002: 5,000 resources planned + up to `maxActionsPerRun` submitted in
+  - [x] NFR-002: 5,000 resources planned + up to `maxActionsPerRun` submitted in
     < 10 minutes with simulated latency.
-  - [ ] Cap defers excess; `capReached` set.
-  - [ ] 429 retries don't break the cycle.
-- **Status:** ⬜ Not started
+  - [x] Cap defers excess; `capReached` set.
+  - [x] 429 retries don't break the cycle.
+- **Status:** ✅ Done (2026-10-07)
 
 ### SC-06 — Operating guidance for large tenants (S)
 
@@ -192,7 +180,7 @@ settling.
   - Timeout < interval rule (from SC-02).
 - **Where:** README.md
 - **Depends on:** SC-01, SC-03, SC-04 (content depends on the implementation)
-- **Status:** ⬜ Not started
+- **Status:** ✅ Done (2026-10-07)
 
 ---
 
@@ -200,13 +188,13 @@ settling.
 
 | Task | Priority | Depends on | Status |
 |---|---|---|---|
-| D-09 (decision) | — | — | ⬜ |
-| SC-01 (parallel submission) | M | D-09 | ⬜ |
-| SC-02 (function timeout) | M | — | ⬜ |
-| SC-03 (cap sizing) | S | D-09 | ⬜ |
-| SC-04 (telemetry volume) | M | — | ⬜ |
-| SC-05 (load test) | M | SC-01, SC-02, SC-04 | ⬜ |
-| SC-06 (guidance) | S | SC-01, SC-03, SC-04 | ⬜ |
+| D-09 (decision) | — | — | ✅ Decided (option A, 2026-10-07) |
+| SC-01 (parallel submission) | M | D-09 | ✅ Done |
+| SC-02 (function timeout) | M | — | ✅ Done |
+| SC-03 (cap sizing) | S | D-09 | ✅ Done (single-cap, guidance) |
+| SC-04 (telemetry volume) | M | — | ✅ Done |
+| SC-05 (load test) | M | SC-01, SC-02, SC-04 | ✅ Done |
+| SC-06 (guidance) | S | SC-01, SC-03, SC-04 | ✅ Done |
 
 ---
 
@@ -222,3 +210,27 @@ settling.
 
 SC-02 and SC-04 can start **immediately** in parallel. SC-01 starts once D-09
 is decided. SC-05 is the acceptance gate. SC-03/06 are docs that follow.
+
+---
+
+## Completion & review (2026-10-07)
+
+All of SC-01–SC-06 are implemented, tested and documented; D-09 is recorded as
+option A in REQUIREMENTS §17.1.
+
+- **Verification:** `pytest` 189 passed / 8 skipped (+17 new, incl. the SC-05
+  5,000-resource load test completing well within budget); `ruff` clean;
+  `terraform fmt -check` clean; `terraform validate` Success; `host.json` parses.
+- **Independent review:** audited the uncommitted diff against all six focus
+  areas — order-group barrier (structural via pool join, not timing), bounded
+  concurrency, thread-safe summary aggregation (mutated only on the caller
+  thread), single cap applied before parallel submission (D-09), per-action
+  failure isolation, unchanged dry-run path, SC-04 suppression scoped to
+  `already-converged` no-ops only, and end-to-end Terraform wiring. **No
+  Critical/High/Medium issues.** Two Low findings fixed: stale "5-minute budget"
+  docstrings updated to the 10-minute NFR-002 budget / 12-minute timeout, and an
+  upper-bound (≤100) validation added to `max_parallel_actions`.
+
+**Not changed (deliberate):** the cap stays a single `maxActionsPerRun` (D-09 A);
+option B (separate stop/start caps) remains a possible later refinement only if
+operations show a single cap is insufficient.
