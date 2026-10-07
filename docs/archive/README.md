@@ -28,6 +28,7 @@ verified over a full live business day (Phase B, closed 2026-10-07).
 | [demo-verification/VERIFICATION.md](demo-verification/VERIFICATION.md) | Demo verification record: dry run (T-602), go-live (T-603), Phase B, issues V1–V5, full results log | All checks passed except C3 (no SQL MI) and App Gateway (not deployed). Superseded for new tenants by the slim runbook [docs/VERIFICATION.md](../VERIFICATION.md). |
 | [demo-verification/DEMO_TENANT_PLAN.md](demo-verification/DEMO_TENANT_PLAN.md) | Demo tenant design, budget and scenarios S1–S18 | Built and verified; demo still running (code in `demo/`) |
 | [demo-verification/DEMO_TASKS.md](demo-verification/DEMO_TASKS.md) | Demo build tracker (DM-), demo-scaffold review (DR-), live-deploy fixes (DP-) | All closed |
+| [demo-verification/DEMO_STATE_BACKEND.md](demo-verification/DEMO_STATE_BACKEND.md) | One-time migration of the demo Terraform roots to the remote azurerm backend (`demosatfstate`) | Done 2026-10-06; still the reference for how the demo state is wired while the demo runs |
 
 ## Large-tenant scaling (v0.7)
 

@@ -29,7 +29,7 @@ terraform {
   # Default: LOCAL state (disposable demo tenant). The current demo workloads
   # state lives on the operator laptop that ran the applies.
   #
-  # OPTIONAL remote backend (recommended — see docs/DEMO_STATE_BACKEND.md). To
+  # OPTIONAL remote backend (recommended — see docs/archive/demo-verification/DEMO_STATE_BACKEND.md). To
   # switch:
   #   1. Uncomment the backend block below.
   #   2. Copy backend.hcl.example → backend.hcl and fill in the demo state

@@ -45,12 +45,12 @@ demo/
 ├── landing-zone/              # MGs, subscription placement + tags, budgets (DM-10–DM-14)
 │   ├── main.tf providers.tf variables.tf budgets.tf outputs.tf
 │   ├── render-demo-tfvars.sh  # generates infra/tenants/demo.tfvars from outputs
-│   ├── backend.hcl.example    # remote state template (DEMO_STATE_BACKEND.md)
+│   ├── backend.hcl.example    # remote state template (archive/demo-verification/DEMO_STATE_BACKEND.md)
 │   └── terraform.tfvars.example
 ├── workloads/                 # W1–W14 with toggles (DM-20–DM-23)
 │   ├── providers.tf variables.tf network.tf
 │   ├── workloads_vms_dev.tf workloads_db_vmss.tf workloads_vms_other.tf workloads_optional.tf
-│   ├── backend.hcl.example    # remote state template (DEMO_STATE_BACKEND.md)
+│   ├── backend.hcl.example    # remote state template (archive/demo-verification/DEMO_STATE_BACKEND.md)
 │   ├── outputs.tf terraform.tfvars.example
 ├── scheduler/
 │   └── demo.tfvars.example    # §2.3 values for infra/scheduler (DM-30)
@@ -74,7 +74,7 @@ Prereqs (manual) → landing-zone apply → workloads apply → scheduler deploy
 ```
 
 All Terraform here uses a **remote azurerm backend** (`demosatfstate` — see
-[docs/DEMO_STATE_BACKEND.md](../docs/DEMO_STATE_BACKEND.md)). Run commands from
+[docs/archive/demo-verification/DEMO_STATE_BACKEND.md](../docs/archive/demo-verification/DEMO_STATE_BACKEND.md)). Run commands from
 the repo root unless noted. Sign in to the **demo tenant** first:
 
 ```bash

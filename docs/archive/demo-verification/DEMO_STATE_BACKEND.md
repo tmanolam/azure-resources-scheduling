@@ -1,10 +1,16 @@
 # Demo State: Migrate to a Remote Backend
 
+> 🗄️ **Archived on 2026-10-07.** Record of the one-time migration of the demo
+> Terraform roots to the remote azurerm backend (`demosatfstate`), completed
+> 2026-10-06. Kept as the reference for how the demo state is wired; it stays
+> relevant to the still-deployed demo infrastructure in
+> [`demo/`](../../../demo/README.md) until the demo is torn down. No longer updated.
+
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-STATE-001 |
 | Status | **Done** (2026-10-06). Both roots migrated to the remote azurerm backend (`demosatfstate`). |
-| Related | [DEMO_TENANT_PLAN.md](archive/demo-verification/DEMO_TENANT_PLAN.md), [../demo/README.md](../demo/README.md), [../infra/tenants/demo.backend.hcl.example](../infra/tenants/demo.backend.hcl.example) |
+| Related | [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../../../demo/README.md](../../../demo/README.md), [../../../infra/tenants/demo.backend.hcl.example](../../../infra/tenants/demo.backend.hcl.example) |
 | Created | 2026-10-06 |
 
 ## Why

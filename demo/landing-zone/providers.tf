@@ -30,7 +30,7 @@ terraform {
   # applies.
   #
   # OPTIONAL remote backend (recommended to avoid split-brain state across
-  # laptops — see docs/DEMO_STATE_BACKEND.md). To switch:
+  # laptops — see docs/archive/demo-verification/DEMO_STATE_BACKEND.md). To switch:
   #   1. Uncomment the backend block below.
   #   2. Copy backend.hcl.example → backend.hcl and fill in the demo state
   #      storage account (reuse infra/tenants/demo.backend.hcl's account; use a
