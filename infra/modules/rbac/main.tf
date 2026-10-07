@@ -36,6 +36,10 @@ locals {
       # wrongly reads the scale set as deallocated, re-submitting start every
       # cycle (finding V5).
       "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read",
+      # Per-instance instance view: used by the vmss handler's fallback when
+      # list(expand="instanceView") does not inline an instance's power state.
+      # Caught by tests/test_rbac_consistency.py (role/SDK drift, lesson from V5).
+      "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/instanceView/read",
       "Microsoft.Compute/virtualMachineScaleSets/start/action",
       "Microsoft.Compute/virtualMachineScaleSets/deallocate/action",
     ]
