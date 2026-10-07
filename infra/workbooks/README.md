@@ -6,6 +6,7 @@ imported manually (not deployed by Terraform).
 | File | Shows |
 |---|---|
 | `pwrsched-day2-operations.workbook.json` | Start/stop actions and failed/skipped decisions, with a time-range selector (default 24 hours). Times in Bangkok time (UTC+7). |
+| `pwrsched-summary.workbook.json` | **For large tenants.** Totals and trends from the one summary record per cycle (`pwrsched.summary`), so it stays fast with thousands of resources: period totals, starts/stops/failures per hour, per-day table, cycle duration (early warning for the scaling backlog), cap events, and failed/skipped counts by resource type. Default range 7 days. Dry-run cycles count would-be actions as skipped, so it is most useful once a tenant is live. |
 
 ## Import
 

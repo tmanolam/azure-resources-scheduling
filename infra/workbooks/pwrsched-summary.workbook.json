@@ -1,0 +1,150 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "name": "intro",
+      "content": {
+        "json": "## Power Scheduler — summary (large tenants)\nTotals and trends built from the **one summary record per cycle** (`pwrsched.summary`), so the cost and speed of these queries don't grow with the number of resources. For per-resource detail, use the day-2 operations workbook. Open this workbook from the scheduler's Application Insights resource.\n\nDay labels are Bangkok time; chart time axes follow your browser's time zone."
+      }
+    },
+    {
+      "type": 9,
+      "name": "parameters",
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "parameters": [
+          {
+            "id": "b7e1d2c3-4a5b-4c6d-8e7f-901a2b3c4d5e",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 604800000
+            },
+            "typeSettings": {
+              "allowCustom": true,
+              "selectableValues": [
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "name": "totals",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.summary\"\n| extend started = toint(customDimensions[\"pwrsched.started\"]),\n         stopped = toint(customDimensions[\"pwrsched.stopped\"]),\n         skipped = toint(customDimensions[\"pwrsched.skipped\"]),\n         failed = toint(customDimensions[\"pwrsched.failed\"]),\n         evaluated = toint(customDimensions[\"pwrsched.evaluated\"]),\n         dur = todouble(customDimensions[\"pwrsched.durationSeconds\"]),\n         cap = tolower(tostring(customDimensions[\"pwrsched.capReached\"]))\n| summarize Cycles = count(),\n            Started = sum(started),\n            Stopped = sum(stopped),\n            Failed = sum(failed),\n            ['Cycles at cap'] = countif(cap == \"true\"),\n            ['Avg resources evaluated'] = round(avg(evaluated), 0),\n            ['Avg duration (s)'] = round(avg(dur), 1),\n            ['Max duration (s)'] = round(max(dur), 1)",
+        "size": 0,
+        "title": "Totals for the selected period",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "noDataMessage": "No cycle summaries in this time range."
+      }
+    },
+    {
+      "type": 3,
+      "name": "actions-per-hour",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.summary\"\n| extend started = toint(customDimensions[\"pwrsched.started\"]),\n         stopped = toint(customDimensions[\"pwrsched.stopped\"]),\n         skipped = toint(customDimensions[\"pwrsched.skipped\"]),\n         failed = toint(customDimensions[\"pwrsched.failed\"]),\n         evaluated = toint(customDimensions[\"pwrsched.evaluated\"]),\n         dur = todouble(customDimensions[\"pwrsched.durationSeconds\"]),\n         cap = tolower(tostring(customDimensions[\"pwrsched.capReached\"]))\n| summarize Started = sum(started), Stopped = sum(stopped), Failed = sum(failed) by bin(timestamp, 1h)\n| order by timestamp asc",
+        "size": 0,
+        "title": "Starts, stops and failures per hour",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "barchart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "per-day",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.summary\"\n| extend started = toint(customDimensions[\"pwrsched.started\"]),\n         stopped = toint(customDimensions[\"pwrsched.stopped\"]),\n         skipped = toint(customDimensions[\"pwrsched.skipped\"]),\n         failed = toint(customDimensions[\"pwrsched.failed\"]),\n         evaluated = toint(customDimensions[\"pwrsched.evaluated\"]),\n         dur = todouble(customDimensions[\"pwrsched.durationSeconds\"]),\n         cap = tolower(tostring(customDimensions[\"pwrsched.capReached\"]))\n// Day as Bangkok-time text, so the grid doesn't convert it again.\n| extend Day = format_datetime(datetime_utc_to_local(timestamp, \"Asia/Bangkok\"), \"yyyy-MM-dd\")\n| summarize Cycles = count(),\n            Started = sum(started),\n            Stopped = sum(stopped),\n            Failed = sum(failed),\n            ['Cycles at cap'] = countif(cap == \"true\"),\n            ['Max duration (s)'] = round(max(dur), 1)\n          by ['Day (Bangkok)'] = Day\n| order by ['Day (Bangkok)'] desc",
+        "size": 0,
+        "title": "Per day (Bangkok)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table"
+      }
+    },
+    {
+      "type": 1,
+      "name": "duration-note",
+      "content": {
+        "json": "**Cycle duration.** One cycle must finish within the function timeout (`functionTimeout` in `src/host.json`) and before the next cycle (NFR-002). Rising maximums are an early warning to apply the scaling backlog (REQUIREMENTS §10.1)."
+      }
+    },
+    {
+      "type": 3,
+      "name": "duration",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.summary\"\n| extend started = toint(customDimensions[\"pwrsched.started\"]),\n         stopped = toint(customDimensions[\"pwrsched.stopped\"]),\n         skipped = toint(customDimensions[\"pwrsched.skipped\"]),\n         failed = toint(customDimensions[\"pwrsched.failed\"]),\n         evaluated = toint(customDimensions[\"pwrsched.evaluated\"]),\n         dur = todouble(customDimensions[\"pwrsched.durationSeconds\"]),\n         cap = tolower(tostring(customDimensions[\"pwrsched.capReached\"]))\n| summarize ['Max duration (s)'] = max(dur), ['Avg duration (s)'] = avg(dur) by bin(timestamp, 1h)\n| order by timestamp asc",
+        "size": 0,
+        "title": "Cycle duration per hour (seconds)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "linechart"
+      }
+    },
+    {
+      "type": 3,
+      "name": "cap-events",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.capReached\"\n| order by timestamp desc\n| project ['Time (Bangkok)'] = format_datetime(datetime_utc_to_local(timestamp, \"Asia/Bangkok\"), \"yyyy-MM-dd HH:mm:ss\"),\n          Cap = toint(customDimensions[\"pwrsched.cap\"]),\n          Deferred = toint(customDimensions[\"pwrsched.deferred\"]),\n          RunId = tostring(customDimensions[\"pwrsched.runId\"])",
+        "size": 0,
+        "title": "Cycles that hit the action cap",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "noDataMessage": "The action cap was not reached in this time range."
+      }
+    },
+    {
+      "type": 3,
+      "name": "issues-by-type",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.decision\"\n| extend result = tostring(customDimensions[\"pwrsched.result\"])\n| where result == \"failed\" or result startswith \"skipped\"\n| summarize Count = count(),\n            Resources = dcount(tostring(customDimensions[\"pwrsched.resourceId\"]))\n          by Result = result, Type = tostring(customDimensions[\"pwrsched.type\"])\n| order by Count desc",
+        "size": 0,
+        "title": "Failed or skipped, by result and resource type",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "noDataMessage": "No failed or skipped decisions in this time range."
+      }
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
