@@ -7,7 +7,7 @@
 | Last updated | 2026-10-07 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | v0.5 — demo tenant **live** since 2026-10-06 (see VERIFICATION.md). OI-01 is set per tenant at deployment; D-09 (scaling caps) awaits decision |
+| Status | v0.6 — demo tenant **live** since 2026-10-06 (see VERIFICATION.md). OI-01 is set per tenant at deployment; D-09 (scaling caps) awaits decision |
 
 ## Table of Contents
 
@@ -232,6 +232,7 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | FR-024 | An on-demand `start` or `stop` shall set `schedule-override-state` to the requested state and `schedule-override-until` to now + 4 hours on the targeted resources (decision D-03). Requires `Microsoft.Resources/tags/write` for the managed identity. | W |
 | FR-027 | Network exposure of the endpoint (private via hub, or public with Entra ID) shall be decided before phase 2 build. | W |
 | FR-028 | Profiles shall support a public holiday calendar (`holidayCalendar`, `stopOnHolidays`), stored in `config/holidays/` and maintained yearly; resources stay stopped on listed dates (decision D-07). | W |
+| FR-029 | **Production opt-in — only if D-06 is superseded.** Production stays excluded today (BR-003). If the business later decides to schedule some production workloads, it shall be built as: (1) a **new decision** superseding D-06, with an owner and the accepted risk; (2) an **explicit allowlist** in configuration (for example `allowProductionSubscriptionIds`) that lifts BR-003 only for the listed subscriptions, so the `environment=prod` tag stays truthful for other tools and policies; (3) the production management group added to `in_scope_management_group_ids` **deliberately**, with a reviewed role-assignment plan; (4) **dry run first** for those subscriptions, with a conservative profile, the safety cap (FR-031) and alerts confirmed. | W |
 
 ### 7.4 Safety
 
@@ -313,6 +314,9 @@ Description : Resources in subscriptions tagged environment=prod are always skip
               There is no opt-in mechanism.
 Constraint  : Enforced in the engine regardless of other tags or configuration.
 Source      : Decision D-06
+Note        : Never relabel a production subscription's environment tag to get it
+              scheduled; other tools and policies rely on it. If production must be
+              scheduled, use FR-029 (explicit allowlist, after a new decision).
 
 BR-004: Override precedence
 Description : A valid future schedule-override-until always takes precedence over the schedule.
@@ -670,3 +674,4 @@ Priority: Must
 | 0.4 | 2026-10-03 | Single tenant-wide deployment: one scheduler per tenant (`infra/scheduler`) with an optional `name_suffix`, replacing per-environment (dev/prod) roots. Updated IAC-003, IAC-006, NFR-010, §5.2 and §13.1 (`environment` → `name_suffix` + `role_assignable_scope`). Production remains hard-excluded (BR-003). |
 | 0.5 | 2026-10-05 | Large-tenant scaling: NFR-002 revised to 5,000 resources / 10 minutes; new FR-034 (parallel submission), NFR-011 (telemetry volume); OBS-001/OBS-002 updated (optional no-op decision records, new summary counts); FR-031 cap sizing note; new §10.1 scaling backlog SC-01–SC-06; risks R-09, R-10. |
 | 0.6 | 2026-10-07 | Container handlers backlog: `container-apps` and `container-instances` added to the §8.1 matrix (Should, backlog); HR-009 (Container Apps) and HR-010 (Container Instances, long-running groups only); new §8.3 backlog CH-01–CH-03 with acceptance criteria; §11.1 role actions for the new handlers; `appservice` row notes that stopping an app does not reduce cost. |
+| 0.6.1 | 2026-10-07 | Added FR-029 (production opt-in design, Won't — only if D-06 is superseded) and a BR-003 note against relabelling the `environment` tag. Status line updated to v0.6. |

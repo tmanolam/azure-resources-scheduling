@@ -104,7 +104,7 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 
 | Item | Status | Alternative / plan |
 |---|---|---|
-| Production workloads | ❌ By design (D-06) | None; production is always excluded. |
+| Production workloads | ❌ By design (D-06) | Production is always excluded. Do **not** relabel the subscription's `environment` tag. If production must be scheduled later, see REQUIREMENTS FR-029 (explicit allowlist after a new decision). |
 | Public holidays | ❌ Phase 2 (D-07) | Set a `stopped` override for the holiday period. |
 | On-demand start/stop API | ❌ Phase 2 (D-05) | Use override tags (UC-10 to UC-12). |
 | Azure SQL Database | ❌ Out of scope (D-08) | Use the serverless tier's own auto-pause. |
@@ -135,3 +135,4 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 | Date | Change |
 |---|---|
 | 2026-10-07 | Initial version: 23 use cases with evidence status, resource type matrix, limitations. Phase B items marked 🔍; update them as VERIFICATION §4.1 completes. |
+| 2026-10-07 | "Production workloads" row points to REQUIREMENTS FR-029 and warns against relabelling the `environment` tag. |
