@@ -408,6 +408,7 @@ Microsoft.Compute/virtualMachines/start/action
 Microsoft.Compute/virtualMachines/deallocate/action
 Microsoft.Compute/virtualMachineScaleSets/read
 Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read
+Microsoft.Compute/virtualMachineScaleSets/virtualMachines/instanceView/read
 Microsoft.Compute/virtualMachineScaleSets/start/action
 Microsoft.Compute/virtualMachineScaleSets/deallocate/action
 Microsoft.ContainerService/managedClusters/read
@@ -675,3 +676,4 @@ Priority: Must
 | 0.5 | 2026-10-05 | Large-tenant scaling: NFR-002 revised to 5,000 resources / 10 minutes; new FR-034 (parallel submission), NFR-011 (telemetry volume); OBS-001/OBS-002 updated (optional no-op decision records, new summary counts); FR-031 cap sizing note; new §10.1 scaling backlog SC-01–SC-06; risks R-09, R-10. |
 | 0.6 | 2026-10-07 | Container handlers backlog: `container-apps` and `container-instances` added to the §8.1 matrix (Should, backlog); HR-009 (Container Apps) and HR-010 (Container Instances, long-running groups only); new §8.3 backlog CH-01–CH-03 with acceptance criteria; §11.1 role actions for the new handlers; `appservice` row notes that stopping an app does not reduce cost. |
 | 0.6.1 | 2026-10-07 | Added FR-029 (production opt-in design, Won't — only if D-06 is superseded) and a BR-003 note against relabelling the `environment` tag. Status line updated to v0.6. |
+| 0.6.2 | 2026-10-07 | §11.1: added `virtualMachineScaleSets/virtualMachines/instanceView/read` (used by the vmss per-instance fallback; found by the new role/SDK consistency test). |
