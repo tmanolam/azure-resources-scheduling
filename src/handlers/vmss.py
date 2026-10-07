@@ -30,7 +30,12 @@ Aggregation (across all instances, Uniform):
 - any instance ``running``            → ``running``   (so a running VMSS is stopped)
 - all instances ``deallocated``       → ``deallocated`` (already converged)
 - all instances powered off (billed)  → ``stopped-allocated`` (needs deallocate, H4)
-- no instances at all (capacity 0)    → ``deallocated`` (nothing is billed)
+- no instances readable, capacity 0   → ``deallocated`` (nothing is billed)
+- no instances readable, capacity > 0 → ``unknown`` (likely missing the
+  ``virtualMachineScaleSets/virtualMachines/read`` role action; the ARM instance
+  list is authorization-filtered to empty rather than 403ing — finding V5. The
+  engine logs ``unknown-state-skip`` and does not act, instead of wrongly
+  reading the scale set as deallocated and re-submitting start every cycle.)
 - any instance in a transitional state (``starting``/``deallocating``/…) and
   none running → that transitional state (engine skips & retries, FR-033)
 - cannot determine                    → ``unknown`` (engine logs unknown-state-skip)
@@ -77,9 +82,15 @@ class VmssHandler(BaseHandler):
         client = self._client(resource)
         name = parse_resource_name(resource.resource_id)
 
+        # One scale-set read gives us both the orchestration mode (V3) and the
+        # SKU capacity (number of instances), which we use below to tell a
+        # genuinely scaled-to-zero scale set apart from an instance list that
+        # came back empty because we lack permission to read it (finding V5).
+        scale_set = self._get_scale_set(client, resource, name)
+        mode = (getattr(scale_set, "orchestration_mode", "") or "").lower() if scale_set else ""
+
         # V3: Flexible scale sets don't expose members via scale_set_vms. Skip
         # (logged, not a failure); their member VMs are scheduled individually.
-        mode = self._orchestration_mode(client, resource, name)
         if mode == "flexible":
             raise HandlerSkip("vmss-flexible-unsupported")
 
@@ -99,9 +110,26 @@ class VmssHandler(BaseHandler):
                 states.append(ps)
 
         if not states:
-            # Capacity 0 (scaled to no instances): nothing is allocated or billed,
-            # which is the desired "stopped" outcome. Treat as deallocated so the
-            # engine converges instead of logging unknown-state-skip.
+            # No instance power states. Two very different causes:
+            #  - genuine capacity 0 (scaled to no instances): nothing is billed,
+            #    which is the desired "stopped" outcome → deallocated (converged);
+            #  - the instance list came back empty because the identity lacks
+            #    Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read
+            #    (ARM authorization-filters the list to empty rather than 403ing).
+            #    Reporting deallocated here would be wrong for a running scale set
+            #    and makes the engine re-submit start every cycle (finding V5).
+            # Use the SKU capacity to tell them apart: capacity > 0 but no states
+            # read ⇒ we can't determine the state ⇒ unknown (engine skips & logs,
+            # not a silent wrong action).
+            capacity = self._capacity(scale_set)
+            if capacity and capacity > 0:
+                logger.warning(
+                    "pwrsched.handlers.vmss: %s has capacity %s but no instance "
+                    "power states were readable; reporting unknown (check the role "
+                    "has Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read)",
+                    name, capacity,
+                )
+                return "unknown"
             return "deallocated"
 
         # Any running instance => the scale set is effectively running and, if the
@@ -123,15 +151,26 @@ class VmssHandler(BaseHandler):
         return "stopped-allocated"
 
     @staticmethod
-    def _orchestration_mode(client, resource: ResourceRecord, name: str) -> str:
-        """Return the scale set's orchestration mode in lower case ('uniform' /
-        'flexible'), or '' if it cannot be determined (treated as Uniform)."""
+    def _get_scale_set(client, resource: ResourceRecord, name: str):
+        """Return the scale set object (for orchestration mode + SKU capacity), or
+        None if it cannot be read. A failure here is defensive: the caller treats
+        an unknown mode as Uniform and an unknown capacity as 'can't tell'."""
         try:
-            ss = client.virtual_machine_scale_sets.get(resource.resource_group, name)
+            return client.virtual_machine_scale_sets.get(resource.resource_group, name)
         except Exception as exc:  # defensive: fall back to Uniform behaviour
             logger.warning("pwrsched.handlers.vmss: get() failed for %s: %s", name, exc)
-            return ""
-        return (getattr(ss, "orchestration_mode", "") or "").lower()
+            return None
+
+    @staticmethod
+    def _capacity(scale_set) -> int | None:
+        """Return the scale set's SKU capacity (instance count), or None if it
+        cannot be determined."""
+        sku = getattr(scale_set, "sku", None) if scale_set is not None else None
+        capacity = getattr(sku, "capacity", None) if sku is not None else None
+        try:
+            return int(capacity) if capacity is not None else None
+        except (TypeError, ValueError):
+            return None
 
     def start(self, resource: ResourceRecord) -> None:
         client = self._client(resource)

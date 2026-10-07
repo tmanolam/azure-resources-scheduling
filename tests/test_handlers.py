@@ -150,7 +150,7 @@ def test_normalise_succeeded_is_unknown_not_running():
 # --- VMSS --------------------------------------------------------------------
 
 def _vmss_client(instance_power_states, calls, *, mode="Uniform", inline_iv=True,
-                 track=None):
+                 track=None, capacity=None):
     """Fake ComputeManagementClient whose scale-set VMs report the given power
     states. ``instance_power_states`` is a list; each entry becomes one instance
     with a ``PowerState/<state>`` status. ``None`` means an instance with no
@@ -161,8 +161,15 @@ def _vmss_client(instance_power_states, calls, *, mode="Uniform", inline_iv=True
       instance view on each instance (the single-call path). When False, ``list``
       returns bare instances and the handler must call ``get_instance_view``.
     - ``track``: optional dict to record call counts for assertions.
+    - ``capacity``: SKU capacity reported by ``virtual_machine_scale_sets.get``.
+      Defaults to the number of instances the list returns. Set it higher than
+      the (empty) instance list to simulate the identity lacking the scale-set
+      VM read action, where ARM returns an empty list for a non-empty scale set
+      (finding V5).
     """
     track = track if track is not None else {}
+    if capacity is None:
+        capacity = len(instance_power_states)
 
     def _mk_iv(state):
         statuses = [_ns(code="ProvisioningState/succeeded")]
@@ -187,7 +194,7 @@ def _vmss_client(instance_power_states, calls, *, mode="Uniform", inline_iv=True
 
     def _get(rg, n):
         track["get"] = track.get("get", 0) + 1
-        return _ns(orchestration_mode=mode)
+        return _ns(orchestration_mode=mode, sku=_ns(capacity=capacity))
 
     vm_ops = _ns(list=_list, get_instance_view=_get_iv)
     ss_ops = _ns(
@@ -237,9 +244,21 @@ def test_vmss_powered_off_but_allocated_is_stopped_allocated():
 
 
 def test_vmss_no_instances_is_deallocated():
-    # Capacity 0 => nothing billed => converged to stopped, not unknown.
+    # Genuine capacity 0 (scaled to no instances) => nothing billed => converged
+    # to stopped, not unknown. capacity defaults to len([]) == 0 here.
     h = VmssHandler(lambda s: _vmss_client([], []))
     assert h.get_state(_vmss_rec()) == "deallocated"
+
+
+def test_vmss_v5_empty_list_but_capacity_present_is_unknown():
+    # Finding V5: the identity lacks virtualMachineScaleSets/virtualMachines/read,
+    # so ARM authorization-filters the instance list to empty even though the
+    # scale set has capacity. The handler must NOT read this as deallocated
+    # (which made the engine re-submit start every cycle); it must report unknown
+    # so the engine skips and logs it instead of acting on a wrong state.
+    h = VmssHandler(lambda s: _vmss_client([], [], capacity=1))
+    assert h.get_state(_vmss_rec()) == "unknown"
+    assert _normalise_actual(h.get_state(_vmss_rec())) is ActualState.UNKNOWN
 
 
 def test_vmss_transitional_when_none_running():

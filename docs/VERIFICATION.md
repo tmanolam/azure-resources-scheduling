@@ -41,6 +41,7 @@ items below.
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
 | V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | ✅ Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008). **Skip-prefix follow-up fixed** (`4fafb3f`): plan-time skips now use `skipped:<reason>` matching execution-time and the workbook filter. Live check pending (no Flexible scale set in the demo) |
 | V4 | `az monitor app-insights query` returns no rows (workspace-based App Insights) | [§6.2](#62-tooling-notes-found-during-verification) | 🔴 Decision made — CLI tooling to be switched to the workspace (`az monitor log-analytics query`); portal, workbook and alerts unchanged |
+| V5 | Custom role missing `virtualMachineScaleSets/virtualMachines/read`; W6 VMSS re-submitted `start` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed + confirmed live (2026-10-07): RBAC read action added + handler capacity-aware; W6 `actualState=Running`, `action=none` |
 
 ### Live checks carried over from the code review
 
@@ -499,6 +500,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-06 | S18 / V1 | ✅ Pass (dry-run) — V1 closed live | **AKS node-pool protection verified live** (HR-007). Provisioned W12 `aks-demo-w12` (Free tier, node `Standard_B2s_v2` — `Standard_B2s` is `NotAvailableForSubscription` in eastasia; `enable_aks=true`, SQL MI stays out of scope by user decision), node RG `rg-demo-aks-nodes`, `provisioningState=Succeeded`/`powerState=Running`. The node-pool scale set `aks-system-33558043-vmss` carries 16 `aks-managed-*` tags (`aks-managed-poolName=system`, …) and **no** `schedule-profile`, so AKS did not copy the cluster tag. **S18 fixture:** tagged the node RG `rg-demo-aks-nodes` `schedule-profile=weekday-0830-1730` (13:41 UTC) so the scale set became discoverable via RG inheritance; confirmed in ARG. **Result — two consecutive cycles (13:45:02 and 14:00:02 UTC):** the node-pool scale set logged `action=none, result=aks-managed-node-pool` (never read/acted on), while the cluster `aks-demo-w12` was scheduled normally by the `aks` handler (`action=stop`, dry-run, correct post-17:30). This is the V1 fix (`_managed_rg_exclusion_reason`: `aks-managed-*` tag key path) reproducing correctly on real AKS tags. **Fixture removed** afterwards (`az tag update --operation Delete`) — node RG back to AKS-managed tags only. V1 live criterion met → V1 closed. | Kiro |
 | 2026-10-06 | T-603 — GO-LIVE | ✅ Done (live) | **Scheduler flipped to live (`dry_run=false`) with AKS in scope.** Set `dry_run=false` in `infra/tenants/demo.tfvars`; `./infra/deploy.sh demo plan` showed **exactly one change** — `pwrsched:dryRun "true"→"false"`, `0 add / 1 change / 0 destroy` (strict §4 / IAC-008 checkpoint met; DP-04/DP-05 `ignore_changes` held, DP-06 no role churn). Applied 14:15 UTC (~21:15 BKK). **First live cycle 14:15:04 UTC:** `dryRun=false` on all decisions; the one real action was **`aks-demo-w12` → `action=stop, result=submitted`** (cluster was Running, past the 17:30 BKK stop boundary). All already-stopped dev resources `already-converged`; **W10 `already-converged`** (user manually stopped it just before go-live); exclusions held live (W4 `schedule-disabled`, W9 `production-excluded`, no Platform-MG/W11). **Control-plane confirmation (SEC-008):** `az aks show` → `powerState=Stopped`; Activity Log `Stop Managed Cluster` (Started 14:15:04.49, Accepted 14:15:04.91) with **caller `595bf154-2328-4066-a465-1ed0b9073ea9` = the scheduler managed-identity principal**. Summary 14:15:04Z: `evaluated=11, started=0, stopped=1, skipped=10, failed=0`; **no `capReached`**, alerts quiet. SQL MI (C3) remains not tested — no SQL MI in scope. | Kiro |
 | 2026-10-06 | Review of go-live | ✅ Signed off | Review of `f043eea`…`afe862d` and all docs. **Signed off:** T-602 (full business-day dry run), H2 (both alerts fired live — also confirms the V4 reasoning that alerts work in the App Insights scope), T-603 go-live (only `pwrsched:dryRun` changed; first live cycle stopped AKS, confirmed at the control plane with the scheduler identity in the Activity Log), V1 closed live (S18), V3 `skipped:` prefix fix (summary `skipped` count includes plan-time skips). Tests 169 passed, ruff clean. **Open:** Phase B live checks (§4.1, new tracker row PB), V3 live check (no Flexible scale set), V4 CLI tooling, C3 not tested (SQL MI out of scope). | Claude |
+| 2026-10-07 | V5 | ✅ Fixed + confirmed live | First live morning (Phase B): W6 `vmss-demo-w6` logged `actualState=Stopped`/`action=start`/`result=submitted` every cycle from 01:30 UTC (08:30 BKK) despite the instance being `PowerState/running`. Root cause: custom role lacked `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read`, so ARM authorization-filtered the per-instance list to empty and the handler read the running scale set as `deallocated` (capacity-0 branch). Fix 1: added the read action to `infra/modules/rbac/main.tf` + REQUIREMENTS §11.1 (demo apply `0 add / 1 change / 0 destroy`, role def updated in-place). Fix 2: `src/handlers/vmss.py` now reads `sku.capacity` from the existing `virtual_machine_scale_sets.get` and returns `unknown` (not `deallocated`) when the instance list is empty but capacity > 0, so a future permission gap is a visible skip, not silent churn. Verified: pytest 162 passed/8 skipped, strict SDK-surface 8 passed, ruff clean, `terraform fmt`/`validate` clean. Re-published code; **04:00:03 UTC cycle: W6 `actualState=Running`, `action=none`, `result=already-converged`** — churn ended. | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -693,6 +695,52 @@ Flexible scale set skips.
 - [ ] Optional live check: a 1-instance **Flexible** scale set tagged with a profile
   for one cycle shows `result=skipped:vmss-flexible-unsupported` and no
   `state-read-failed`; delete it afterwards.
+
+#### V5 — custom role missing scale-set VM read action; VMSS re-submits start every cycle
+
+| | |
+|---|---|
+| **Severity** | High |
+| **Status** | ✅ Fixed and **confirmed live** (demo 2026-10-07): W6 converged to `actualState=Running`, `action=none` |
+| **Found** | 2026-10-07, first live business morning (Phase B), W6 (`vmss-demo-w6`) |
+| **Location** | `infra/modules/rbac/main.tf` (vmss action set); `src/handlers/vmss.py` (`get_state`); REQUIREMENTS §11.1 |
+| **Related** | V2, V3, HR-008, SEC-002, FR-004 |
+
+**Description.** From the 01:30 UTC (08:30 Bangkok) start boundary, W6 logged
+`actualState=Stopped`, `action=start`, `result=submitted` **every** cycle even
+though its instance was `PowerState/running` — the engine kept re-submitting
+`start` because it never saw the scale set as running.
+
+**Root cause.** The custom role **Resource Power Operator** granted
+`Microsoft.Compute/virtualMachineScaleSets/read` but **not**
+`Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read`. The `vmss`
+handler reads power state from the per-instance view (Uniform scale sets carry
+no power state on the scale-set resource — V2/V3). Without the child read action
+ARM **authorization-filters the instance list to empty** (an empty collection,
+not a 403), so the handler hit its "no instances → capacity 0 → `deallocated`"
+branch and reported `Stopped`. Overnight this happened to be correct (W6 was
+genuinely deallocated); after the morning start it was wrong, causing the churn.
+Confirmed by querying Resource Graph (`powerState=""` for the VMSS → handler
+fallback used) and by running the handler's SDK calls as a privileged identity
+(1 instance, `PowerState/running`) vs. the managed identity (empty list).
+
+**Fix.**
+1. **RBAC (resolves the live symptom):** added
+   `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read` to the `vmss`
+   action set (`infra/modules/rbac/main.tf`) and REQUIREMENTS §11.1. Applied to
+   the demo tenant: `0 add / 1 change / 0 destroy` (role definition updated
+   in-place; no assignments touched).
+2. **Handler robustness (prevents silent recurrence):** `get_state` now reads the
+   scale set's `sku.capacity` from the single `virtual_machine_scale_sets.get`
+   it already makes for orchestration mode. If no instance power states are
+   readable **but capacity > 0**, it returns `unknown` (engine logs
+   `unknown-state-skip` and does not act) instead of silently assuming
+   `deallocated`. Genuine capacity 0 still returns `deallocated`.
+
+**Acceptance criteria.**
+- [x] Custom role includes `virtualMachineScaleSets/virtualMachines/read` (verified live via `az role definition list`).
+- [x] Unit test: empty instance list with capacity > 0 → `unknown` (`test_vmss_v5_empty_list_but_capacity_present_is_unknown`); genuine capacity 0 → `deallocated` (`test_vmss_no_instances_is_deallocated`). Suite 162 passed / 8 skipped; strict SDK-surface 8 passed; ruff clean.
+- [x] Live: after applying the role change and re-publishing the code, W6 reads `actualState=Running`, `action=none`, `result=already-converged` (demo 2026-10-07, 04:00:03 UTC cycle), ending the per-cycle `start` churn.
 
 ### 6.2 Tooling notes found during verification
 

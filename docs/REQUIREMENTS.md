@@ -403,6 +403,7 @@ Microsoft.Compute/virtualMachines/instanceView/read
 Microsoft.Compute/virtualMachines/start/action
 Microsoft.Compute/virtualMachines/deallocate/action
 Microsoft.Compute/virtualMachineScaleSets/read
+Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read
 Microsoft.Compute/virtualMachineScaleSets/start/action
 Microsoft.Compute/virtualMachineScaleSets/deallocate/action
 Microsoft.ContainerService/managedClusters/read

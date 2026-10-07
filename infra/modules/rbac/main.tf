@@ -29,6 +29,13 @@ locals {
     ]
     vmss = [
       "Microsoft.Compute/virtualMachineScaleSets/read",
+      # Required to list the scale set's VM instances and read their power state
+      # (Uniform scale sets carry no power state on the scale-set resource; it
+      # lives on the per-instance view — findings V2/V3, HR-008). Without this,
+      # the instance list is authorization-filtered to empty and the handler
+      # wrongly reads the scale set as deallocated, re-submitting start every
+      # cycle (finding V5).
+      "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read",
       "Microsoft.Compute/virtualMachineScaleSets/start/action",
       "Microsoft.Compute/virtualMachineScaleSets/deallocate/action",
     ]
