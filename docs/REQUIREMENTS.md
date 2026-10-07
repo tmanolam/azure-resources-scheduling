@@ -3,8 +3,8 @@
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-RS-001 |
-| Version | 0.5 (Large-tenant scaling requirements) |
-| Last updated | 2026-10-06 |
+| Version | 0.6 (Container handlers backlog) |
+| Last updated | 2026-10-07 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
 | Status | v0.5 — demo tenant **live** since 2026-10-06 (see VERIFICATION.md). OI-01 is set per tenant at deployment; D-09 (scaling caps) awaits decision |
@@ -258,7 +258,9 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | `appgw` | `Microsoft.Network/applicationGateways` | Start | Stop | 2 | C |
 | `synapse-pool` | `Microsoft.Synapse/workspaces/sqlPools` | Resume | Pause | 1 | C |
 | `sqldb` | `Microsoft.Sql/servers/databases` | – | – | – | Out of scope (D-08) |
-| `appservice` | `Microsoft.Web/serverfarms` | Scale up | Scale down | 3 | W |
+| `appservice` | `Microsoft.Web/serverfarms` | Scale up | Scale down | 3 | W — stopping an app does not reduce cost (the plan is billed regardless) |
+| `container-apps` | `Microsoft.App/containerApps` | Start | Stop | 2 | S — backlog (§8.3, HR-009) |
+| `container-instances` | `Microsoft.ContainerInstance/containerGroups` | Start | Stop | 2 | S — backlog (§8.3, HR-010) |
 
 ### 8.2 Handler-specific requirements
 
@@ -272,6 +274,26 @@ Priority uses MoSCoW: **M**ust, **S**hould, **C**ould, **W**on't (this phase).
 | HR-006 | Azure SQL Database is out of scope (decision D-08). No handler is built; the type is not queried, so tagging these databases has no effect. |
 | HR-007 | Managed resource groups: scale sets and VMs in a resource group owned by another Azure service (non-empty `managedBy`), including AKS node pools, shall never be started or stopped directly. The engine shall mark such resources ineligible — reason `aks-managed-node-pool` when a tag key starts with `aks-managed-` (case-insensitive) or the RG `managedBy` references a `Microsoft.ContainerService/managedClusters` resource, otherwise `managed-resource-group` — and shall log a decision record for them. AKS is controlled only through the cluster's own stop/start (the `aks` handler); the `MC_` node-RG name prefix is not relied on because it can be customised. (Found as verification issue V1.) |
 | HR-008 | Scale-set orchestration mode: the `vmss` handler reads power state per instance. For **Uniform** scale sets it uses `virtual_machine_scale_set_vms.list(expand="instanceView")` (one call per cycle) and aggregates: any instance running → running; all off but allocated → `stopped-allocated` (deallocate, H4); all deallocated or capacity 0 → deallocated; otherwise a transitional state is surfaced and skipped (FR-033). For **Flexible** scale sets (members are ordinary VMs not exposed via `virtual_machine_scale_set_vms`), the handler raises `HandlerSkip("vmss-flexible-unsupported")` — logged as a skip, never counted as a failure or retried. To schedule a Flexible scale set's workload, tag the **member VMs** (handled by the `vm` handler), not the scale set; do not tag both. (Found as verification issue V3; V2 fixed the Uniform per-instance read.) |
+| HR-009 | Container Apps (`container-apps`, backlog): the handler reads the app's running state (expected in `properties.runningStatus`; confirm the field and its values against the `Microsoft.App` API version used) and maps it to running / stopped / transitional. Stop and start use the Container Apps stop/start operations. Container Apps **jobs** (`Microsoft.App/jobs`) are out of scope. Cost note for owners: on the Consumption plan an app with minimum replicas 0 already costs little when idle, so the saving is mainly for apps with minimum replicas ≥ 1 or on dedicated workload profiles (where profile minimum nodes and plan charges may still apply). |
+| HR-010 | Container Instances (`container-instances`, backlog): the handler reads `properties.instanceView.state` (`Running`, `Stopped`, `Pending`, `Succeeded`, `Failed`). Only container groups with `restartPolicy = Always` are scheduled; groups with `OnFailure` or `Never` are run-to-completion jobs and the handler raises `HandlerSkip("aci-not-long-running")` (logged as `skipped:…`, never started). Stop releases the resources and stops billing; start redeploys the same configuration and pulls the image again. Container state is **not** preserved and the group's IP address may change, so workloads that need a stable address should use a DNS name label. |
+
+### 8.3 Handler backlog — container services (CH-)
+
+New handlers follow HR-005 / NFR-007: a handler module plus custom-role
+permissions; no core engine change. IDs use the prefix **CH-** (container
+handler). Recommended order: **CH-02 first** (clear saving: billing stops when
+stopped), then **CH-01** where apps keep minimum replicas ≥ 1 or use dedicated
+workload profiles.
+
+| ID | Item | Description | Acceptance criteria | Priority |
+|---|---|---|---|---|
+| CH-01 | `container-apps` handler (HR-009) | New `src/handlers/container_apps.py` using `azure-mgmt-appcontainers` (`begin_start` / `begin_stop`, `get`). Map the running state (HR-009). Register the type in discovery (`microsoft.app/containerapps` → `container-apps`), default order 2, and allow the key in `enabled_resource_types` validation. Add the three role actions (§11.1). Pin the SDK in `src/requirements.txt`. | Unit tests: state mapping (running / stopped / transitional / unknown), start and stop call the right operations, dry-run makes no calls. SDK surface test covers the new client calls. Terraform role includes the actions when the type is enabled. README handler table updated. | S |
+| CH-02 | `container-instances` handler (HR-010) | New `src/handlers/container_instances.py` using `azure-mgmt-containerinstance` (`begin_start` / `stop`, `get`). Map `instanceView.state` (HR-010); skip groups whose `restartPolicy` is not `Always` with `aci-not-long-running`. Register the type in discovery (`microsoft.containerinstance/containergroups` → `container-instances`), default order 2, and allow the key in `enabled_resource_types`. Add the three role actions (§11.1). Pin the SDK in `src/requirements.txt`. | Unit tests: state mapping incl. `Succeeded` / `Failed`; `OnFailure` and `Never` groups skipped as `skipped:aci-not-long-running` with `failed == 0`; start and stop call the right operations. SDK surface test covers the new client calls. Terraform role and README updated. | S |
+| CH-03 | Demo verification | Add optional demo workloads behind toggles (`enable_aca`, `enable_aci`): one Container App (Consumption, minimum replicas 1) and one Container Instance group (`restartPolicy = Always`), plus one run-to-completion ACI group (`restartPolicy = Never`) to prove the skip. Tag with the standard profile. | Dry run: start/stop decisions at the expected times (order 2 → 08:15); the `Never` group logs `skipped:aci-not-long-running`. Live: stop at 17:30 is confirmed in Azure (`Stopped`) with the managed identity in the Activity Log; start at 08:15 brings both back. Results recorded in VERIFICATION §6. | S |
+
+Not planned: App Service / Function Premium "stop" (no saving, see §8.1);
+Container Apps jobs; services without a stop operation (Cosmos DB, Container
+Registry, Event Hubs, Service Bus).
 
 ## 9. Business Rules
 
@@ -398,6 +420,17 @@ Microsoft.Sql/managedInstances/stop/action
 Microsoft.Network/applicationGateways/read
 Microsoft.Network/applicationGateways/start/action
 Microsoft.Network/applicationGateways/stop/action
+```
+
+Added when the backlog container handlers (§8.3) are enabled:
+
+```
+Microsoft.App/containerApps/read
+Microsoft.App/containerApps/start/action
+Microsoft.App/containerApps/stop/action
+Microsoft.ContainerInstance/containerGroups/read
+Microsoft.ContainerInstance/containerGroups/start/action
+Microsoft.ContainerInstance/containerGroups/stop/action
 ```
 
 > 📝 Note: Verify exact action names against the current Azure resource provider operations list before finalising the role. Add Synapse permissions only if the `synapse-pool` handler is enabled.
@@ -635,3 +668,4 @@ Priority: Must
 | 0.3 | 2026-10-03 | Decisions D-07 (holidays to phase 2, FR-028) and D-08 (Azure SQL Database out of scope). Removed holiday fields from the phase 1 profile schema. Added risk R-08. |
 | 0.4 | 2026-10-03 | Single tenant-wide deployment: one scheduler per tenant (`infra/scheduler`) with an optional `name_suffix`, replacing per-environment (dev/prod) roots. Updated IAC-003, IAC-006, NFR-010, §5.2 and §13.1 (`environment` → `name_suffix` + `role_assignable_scope`). Production remains hard-excluded (BR-003). |
 | 0.5 | 2026-10-05 | Large-tenant scaling: NFR-002 revised to 5,000 resources / 10 minutes; new FR-034 (parallel submission), NFR-011 (telemetry volume); OBS-001/OBS-002 updated (optional no-op decision records, new summary counts); FR-031 cap sizing note; new §10.1 scaling backlog SC-01–SC-06; risks R-09, R-10. |
+| 0.6 | 2026-10-07 | Container handlers backlog: `container-apps` and `container-instances` added to the §8.1 matrix (Should, backlog); HR-009 (Container Apps) and HR-010 (Container Instances, long-running groups only); new §8.3 backlog CH-01–CH-03 with acceptance criteria; §11.1 role actions for the new handlers; `appservice` row notes that stopping an app does not reduce cost. |
