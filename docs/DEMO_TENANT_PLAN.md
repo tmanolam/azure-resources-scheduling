@@ -8,7 +8,7 @@
 | Created | 2026-10-04 |
 | Audience | Implementer (Kiro), platform team, presenter |
 | Budget | Azure credit of USD 1,000 in a fresh tenant |
-| Status | **Live (go-live done 2026-10-06)** — landing zone, workloads (incl. AKS/W12) and scheduler deployed; state on remote backend; T-602 dry-run validated and T-603 go-live complete (`dry_run=false`). SQL MI (W14) out of scope; App Gateway (W13) not deployed |
+| Status | **Live (go-live done 2026-10-06; Phase B complete 2026-10-07)** — landing zone, workloads (incl. AKS/W12) and scheduler deployed; state on remote backend; T-602 dry-run validated, T-603 go-live done (`dry_run=false`), and Phase B verified over a full live business day (morning start, 17:30 reverse-order stop, 18:00 sandbox stop, override/drift/poweroff/cap scenarios). SQL MI (W14) out of scope; App Gateway (W13) not deployed |
 
 ## 1. Purpose and outcome
 
@@ -336,3 +336,4 @@ Notes for Kiro:
 | 0.4 | 2026-10-04 | Added S18 (AKS node pool protection, verifies V1), explicit AKS node resource group name for W12, Phase B gate on V1, and a matching risk row. |
 | 0.5 | 2026-10-06 | Status updated to in-progress. §9 teardown step 6 clarified: state account holds all three roots after migration to remote backend ([DEMO_STATE_BACKEND.md](DEMO_STATE_BACKEND.md)). |
 | 0.6 | 2026-10-06 | **Go-live done (T-603).** Full business-day dry-run validated (morning start + 17:30 stop window), then flipped `dry_run=false` (plan showed only `pwrsched:dryRun`). AKS/W12 provisioned and **S18/V1 verified live** (node-pool scale set logged `aks-managed-node-pool`, never acted on); V1 closed. First live cycle stopped the AKS cluster via the managed identity (SEC-008). **Deviation:** W12 node size is `Standard_B2s_v2`, not `Standard_B2s` (the latter is `NotAvailableForSubscription` in eastasia — same capacity restriction as the demo VMs). SQL MI (W14) kept out of scope by decision; C3 recorded "not tested". Evidence in [VERIFICATION.md §6](VERIFICATION.md#6-results-log). |
+| 0.7 | 2026-10-07 | **Phase B complete.** First full live business day verified: morning start window (08:00 DBs → 08:15 AKS → 08:30 VMs/VMSS → 09:00 sandbox), the **17:30 reverse-order stop** (S12: VMs/VMSS order 3 → AKS order 2 → DBs order 1) with the **V2 running→deallocate** path (W6), the **18:00 sandbox stop** (W10), and the evening scenarios S4 (work late), S5 (stop early), S5b (ad-hoc start), S10 (drift), S11a/S11b (poweroff inside/outside hours) and S14 (action cap + OBS-005 alert). All actions by the managed identity (SEC-008); `failed=0`, no `capReached`. Evidence in [VERIFICATION.md §6](VERIFICATION.md#6-results-log); PB closed in the §0 tracker. |
