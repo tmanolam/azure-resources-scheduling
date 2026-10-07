@@ -1,15 +1,17 @@
 # Demo Tenant Build — Task Breakdown
 
+> 🗄️ **Archived on 2026-10-07** (moved from `demo/TASKS.md`). The demo build tracker (DM-), demo-scaffold review findings (DR-) and live-deploy fixes (DP-) are all closed. Kept unchanged as history.
+
 > Working task tracker for the `demo/` build (DM-10–DM-44). Decomposes the
-> implementation tasks in [DEMO_TENANT_PLAN.md §5](../docs/DEMO_TENANT_PLAN.md)
+> implementation tasks in [DEMO_TENANT_PLAN.md §5](DEMO_TENANT_PLAN.md)
 > into concrete subtasks, each flagged by whether it can be built **offline now**
 > or **needs the live demo tenant**. Mirrors the archived
-> [PHASE1_TASKS.md](../docs/archive/PHASE1_TASKS.md) style.
+> [PHASE1_TASKS.md](../PHASE1_TASKS.md) style.
 
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-TASKS-001 |
-| Related | [DEMO_TENANT_PLAN.md](../docs/DEMO_TENANT_PLAN.md), [VERIFICATION.md](../docs/VERIFICATION.md), [REQUIREMENTS.md](../docs/REQUIREMENTS.md) |
+| Related | [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [VERIFICATION.md](VERIFICATION.md), [REQUIREMENTS.md](../../REQUIREMENTS.md) |
 | Created | 2026-10-04 |
 | Status legend | ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked |
 | Buildability | 🟢 Offline-buildable now (no live tenant) · 🔵 Needs live tenant/subscriptions |

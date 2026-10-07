@@ -1,9 +1,11 @@
 # Verification Runbook
 
+> 🗄️ **Archived on 2026-10-07.** This is the full verification record of the reference **demo tenant**: dry run (T-602), go-live (T-603), Phase B (first live business day), issues V1–V5 and the complete results log. It is kept unchanged as evidence and is no longer updated. For deploying and verifying a **new tenant**, use the slim runbook [docs/VERIFICATION.md](../../VERIFICATION.md). Use-case evidence links in [docs/USE_CASES.md](../../USE_CASES.md) point here.
+
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-VERIFY-001 |
-| Related | [REQUIREMENTS.md](REQUIREMENTS.md), [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
+| Related | [REQUIREMENTS.md](../../REQUIREMENTS.md), [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../README.md](../../../README.md), [archived implementation docs](../../../README.md) |
 | Last updated | 2026-10-07 |
 | Scope | How to verify the scheduler — static checks (T-601), live dry-run (T-602), go-live (T-603) |
 
@@ -12,7 +14,7 @@ single place to track what remains before go-live. T-601 runs offline (and in
 CI); T-602/T-603 require a live Azure tenant.
 
 Implementation and code review are finished; their documents are in
-[archive/](archive/README.md). Task IDs (`T-xxx`) and finding IDs (`C1`, `N3`, …)
+[archive/](../../../README.md). Task IDs (`T-xxx`) and finding IDs (`C1`, `N3`, …)
 below refer to those archived documents.
 
 ---
@@ -47,7 +49,7 @@ items below.
 
 Each of these is fixed in code but can only be confirmed on a deployed app. All
 must pass before T-603. Background on each ID is in
-[archive/REVIEW_FINDINGS.md](archive/REVIEW_FINDINGS.md).
+[archive/REVIEW_FINDINGS.md](../REVIEW_FINDINGS.md).
 
 | ID | Live check | Where | Status |
 |---|---|---|---|
