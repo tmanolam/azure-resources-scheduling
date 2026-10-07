@@ -73,15 +73,17 @@ python -m pip install pytest tzdata     # once
 python -m pytest -q
 ```
 
-**Expected:** all tests pass (currently **162 passed, 8 skipped**). The 8 skipped
+**Expected:** all tests pass (currently **172 passed, 8 skipped**). The 8 skipped
 are the SDK surface checks, which need `src/requirements.txt` installed and run in
-the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 170 pass. The
+the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 180 pass. The
 suite covers the pure evaluator (timezones, midnight crossing, overrides),
 discovery (paging, Resource Graph joins and power state), selection (production
 hard-exclusion and its fail-safe, tag precedence, scope exclusion),
 ordering/safety, the reconcile orchestrator (dry-run, skips, bounded parallel
 state reads), the 7 handlers, the telemetry field contract, observability
-flushing, and the App Configuration loader + runtime assembly.
+flushing, the App Configuration loader + runtime assembly, and the role/SDK
+consistency check (`tests/test_rbac_consistency.py` — every ARM operation a
+handler calls must be granted by the custom role; lesson from V5).
 
 ### 1.2 Terraform static checks (IAC-008)
 
@@ -517,6 +519,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-07 | S11a (Phase B) | ✅ Pass | Powered-off (not deallocated) VM, inside hours (H4). `az vm run-command … sudo poweroff` on W5 (`rg-demo-poweroff`) → `PowerState/stopped` (allocated, billed). 08:15 UTC cycle read `actual=StoppedAllocated, desired=Running, action=start, result=submitted` — the handler correctly distinguished an OS-level poweroff from `deallocated` and started it. | Kiro |
 | 2026-10-07 | S10 (Phase B) | ✅ Pass | Drift correction. Stopped W7 PostgreSQL (`rg-demo-db`) out of band during business hours → 08:30 UTC cycle `actual=Stopped, desired=Running, action=start, result=submitted`; W7 back to `Ready` within the cycle. Self-heal (NFR-003) confirmed live; also models the 7-day platform auto-restart (HR-003). | Kiro |
 | 2026-10-07 | S5 (Phase B) | ✅ Pass | Stop-early override lifecycle. W3 (`rg-demo-override`) tagged `schedule-override-state=stopped`, `schedule-override-until=16:08+07:00`. 08:45 UTC `desired=Stopped, actual=Running, action=stop, submitted` (W3 deallocated); 09:00 `already-converged`; after expiry 09:15 UTC `desired=Running, action=start, submitted` (schedule resumed, W3 starting). Confirms BR-004 override precedence and resumption. Cleared the override tags afterwards. | Kiro |
+| 2026-10-07 | V5 review follow-up | ✅ Addressed | Reviewer flagged the V5 role fix as **incomplete**: the vmss handler's per-instance fallback calls `get_instance_view`, which needs `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/instanceView/read` in addition to `.../virtualMachines/read`. Reviewer added that action to `infra/modules/rbac/main.tf` (`29ad8fb`) + REQUIREMENTS §11.1 (`80a303d`, v0.6.2) and a new **`tests/test_rbac_consistency.py`** that statically scans each handler's SDK calls and asserts the custom role grants the matching ARM action (guards against the role/SDK drift that caused V5). I pulled both commits, ran the suite (**172 passed / 8 skipped**; the consistency test's 10 cases pass), and **applied the role change live** to the demo tenant (`./infra/deploy.sh demo apply` → `0 add / 1 change / 0 destroy`; `az role definition list` now shows all three vmss read actions; re-plan "No changes"). | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -762,6 +765,20 @@ fallback used) and by running the handler's SDK calls as a privileged identity
 - [x] Custom role includes `virtualMachineScaleSets/virtualMachines/read` (verified live via `az role definition list`).
 - [x] Unit test: empty instance list with capacity > 0 → `unknown` (`test_vmss_v5_empty_list_but_capacity_present_is_unknown`); genuine capacity 0 → `deallocated` (`test_vmss_no_instances_is_deallocated`). Suite 162 passed / 8 skipped; strict SDK-surface 8 passed; ruff clean.
 - [x] Live: after applying the role change and re-publishing the code, W6 reads `actualState=Running`, `action=none`, `result=already-converged` (demo 2026-10-07, 04:00:03 UTC cycle), ending the per-cycle `start` churn.
+
+**Review follow-up (2026-10-07).** The reviewer flagged that the first fix was
+**incomplete**: the handler's fallback also calls
+`virtual_machine_scale_set_vms.get_instance_view(...)` (when
+`list(expand="instanceView")` does not inline an instance's power state), which
+needs a **second** action — `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/instanceView/read`
+— beyond the `.../virtualMachines/read` needed to list instances. Added that
+action to the role (`29ad8fb`) + REQUIREMENTS §11.1 (`80a303d`) and **applied it
+live** (demo `0 add / 1 change / 0 destroy`; `az role definition list` now shows
+all three vmss read actions; re-plan "No changes"). The reviewer also added
+`tests/test_rbac_consistency.py`, which statically scans each handler for its SDK
+calls and asserts the custom role grants the matching ARM action — so role/SDK
+drift (the V5 root cause) now fails CI. Full suite **172 passed / 8 skipped**
+(the +10 are the new consistency checks).
 
 ### 6.2 Tooling notes found during verification
 
