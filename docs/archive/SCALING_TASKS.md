@@ -1,9 +1,11 @@
 # Large-Tenant Scaling — Task Breakdown
 
+> 🗄️ **Archived on 2026-10-07.** All six scaling tasks (SC-01–SC-06) and decision D-09 are done in code (v0.7). Kept unchanged as history. The live content is in [REQUIREMENTS.md §10.1 and §17.1](../REQUIREMENTS.md) (requirements, D-09), README **Large tenants** (operation) and the per-tenant runbook [VERIFICATION.md](../VERIFICATION.md) §2/§4 (rollout). Deployment to each tenant is recorded in that runbook's results log.
+
 | Item | Value |
 |---|---|
 | Document ID | AZ-PWRSCHED-SCALING-TASKS-001 |
-| Related spec | [REQUIREMENTS.md §10.1](REQUIREMENTS.md) (v0.5, SC-01–SC-06), FR-034, NFR-002, NFR-011 |
+| Related spec | [REQUIREMENTS.md §10.1](../REQUIREMENTS.md) (v0.5, SC-01–SC-06), FR-034, NFR-002, NFR-011 |
 | Created | 2026-10-06 |
 | Status legend | ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked |
 
@@ -25,7 +27,7 @@
 
 > **D-09 (DECIDED 2026-10-07): option A — single `maxActionsPerRun`.**
 >
-> Recorded in [REQUIREMENTS §17.1](REQUIREMENTS.md) as D-09. Keep one combined
+> Recorded in [REQUIREMENTS §17.1](../REQUIREMENTS.md) as D-09. Keep one combined
 > per-cycle action cap; **do not** split into `maxStopsPerRun`/`maxStartsPerRun`
 > (option B) or add a percentage floor (option C). The cap stays a safety brake
 > against mass mis-tagging, sized from the measured peak (SC-03, ≈ peak × 1.2).

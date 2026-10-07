@@ -81,7 +81,6 @@ azure-power-scheduler/
 │   ├── REQUIREMENTS.md
 │   ├── USE_CASES.md                # supported use cases, with evidence status
 │   ├── VERIFICATION.md             # per-tenant rollout runbook (deploy, dry run, go-live)
-│   ├── SCALING_TASKS.md            # large-tenant workstream (SC-01–SC-06)
 │   ├── presentations/              # solution decks
 │   └── archive/                    # finished work: phase-1 tasks/review, demo verification record
 ├── config/                         # Loaded into App Configuration by Terraform

@@ -227,6 +227,7 @@ q 'AppTraces | where Properties["pwrsched.event"] == "pwrsched.decision"
 
 | Date | Tenant | Step | Result | Evidence / notes | By |
 |---|---|---|---|---|---|
+| — | demo | §3 + §7 for the v0.7 scaling release (SC-01–SC-06) | ⬜ Pending | Deploy (`apply` + code publish), then DP-04 host storage and DP-05 "No changes" checks, then one live start or stop window: order still databases → AKS → VMs on start (reverse on stop) in the Activity Log timestamps, `failed=0`. Then update the "Large tenants" row in USE_CASES. | |
 | | | | | | |
 
 The reference results for the demo tenant are in

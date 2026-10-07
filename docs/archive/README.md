@@ -28,3 +28,9 @@ verified over a full live business day (Phase B, closed 2026-10-07).
 | [demo-verification/VERIFICATION.md](demo-verification/VERIFICATION.md) | Demo verification record: dry run (T-602), go-live (T-603), Phase B, issues V1–V5, full results log | All checks passed except C3 (no SQL MI) and App Gateway (not deployed). Superseded for new tenants by the slim runbook [docs/VERIFICATION.md](../VERIFICATION.md). |
 | [demo-verification/DEMO_TENANT_PLAN.md](demo-verification/DEMO_TENANT_PLAN.md) | Demo tenant design, budget and scenarios S1–S18 | Built and verified; demo still running (code in `demo/`) |
 | [demo-verification/DEMO_TASKS.md](demo-verification/DEMO_TASKS.md) | Demo build tracker (DM-), demo-scaffold review (DR-), live-deploy fixes (DP-) | All closed |
+
+## Large-tenant scaling (v0.7)
+
+| Document | What it covered | Final state |
+|---|---|---|
+| [SCALING_TASKS.md](SCALING_TASKS.md) | Task breakdown for SC-01–SC-06 and decision D-09 (single cap) | All done in code (v0.7). Requirements stay in [REQUIREMENTS.md §10.1](../REQUIREMENTS.md); operation in README **Large tenants**; rollout in [VERIFICATION.md](../VERIFICATION.md) |
