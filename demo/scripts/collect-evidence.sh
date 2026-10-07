@@ -3,9 +3,15 @@
 # DM-42 — collect-evidence.sh <label>
 #
 # Runs the VERIFICATION §3.4 queries (1–7) and the §8 demo queries (Q-A..Q-G)
-# against the deployed Application Insights, saving each result to
+# against the scheduler's backing Log Analytics workspace, saving each result to
 #   demo/evidence/<date>-<label>/
 # so the output can be linked from the VERIFICATION §6 results log.
+#
+# The App Insights is workspace-based, so this queries the workspace tables
+# (AppTraces / Properties / TimeGenerated) via `az monitor log-analytics query`,
+# not `az monitor app-insights query` (which returns no rows). The saved .kql
+# files keep the classic traces/customDimensions schema for the portal and the
+# workbook; this script translates them to the workspace schema on the fly (V4).
 #
 # The evidence directory is git-ignored (see demo/.gitignore).
 #
@@ -49,15 +55,53 @@ if [[ -z "$APPI" || -z "$RG" ]]; then
 fi
 [[ -n "$APPI" && -n "$RG" ]] || die "Could not resolve App Insights/RG. Pass --app and --rg (or ensure ./infra/deploy.sh demo output works)."
 
+# V4: the scheduler's App Insights is workspace-based, so `az monitor
+# app-insights query` (classic traces/customDimensions) returns no rows. Query
+# the backing Log Analytics workspace instead (AppTraces / Properties /
+# TimeGenerated). The saved .kql files stay on the classic schema for the portal
+# and the workbook; we translate them on the fly for the CLI below.
+WS="$(az monitor log-analytics workspace show -g "$RG" --workspace-name log-pwrsched \
+        --query customerId -o tsv 2>/dev/null || true)"
+[[ -n "$WS" ]] || die "Could not resolve the Log Analytics workspace (log-pwrsched) customerId in $RG."
+
+# Translate a portal/classic KQL query to the workspace table schema (V4):
+#   traces -> AppTraces, requests -> AppRequests, exceptions -> AppExceptions,
+#   customDimensions[ -> Properties[, timestamp -> TimeGenerated,
+#   operation_Name -> OperationName, message -> Message, severityLevel -> SeverityLevel.
+# Uses Python (a documented prerequisite) for portable word-boundary regex, since
+# BSD/macOS `sed` has no `\b`. Table renames are guarded so an identifier that
+# merely contains "traces"/"requests" is not mangled.
+to_workspace_kql() {
+  python3 - <<'PY'
+import re, sys
+q = sys.stdin.read()
+q = q.replace("customDimensions[", "Properties[")
+subs = [
+    (r"\btimestamp\b", "TimeGenerated"),
+    (r"\boperation_Name\b", "OperationName"),
+    (r"\bseverityLevel\b", "SeverityLevel"),
+    (r"\bmessage\b", "Message"),
+    (r"\btraces\b", "AppTraces"),
+    (r"\brequests\b", "AppRequests"),
+    (r"\bexceptions\b", "AppExceptions"),
+]
+for pat, repl in subs:
+    q = re.sub(pat, repl, q)
+sys.stdout.write(q)
+PY
+}
+
 OUT_DIR="$REPO_ROOT/demo/evidence/$(date +%Y-%m-%d)-$LABEL"
 mkdir -p "$OUT_DIR"
-_bold "Collecting evidence into $OUT_DIR (app=$APPI, rg=$RG)"
+_bold "Collecting evidence into $OUT_DIR (workspace=$WS, rg=$RG)"
 
 run_query() {
   local name="$1" kql="$2" out="$OUT_DIR/$name"
   log "running $name ..."
-  if az monitor app-insights query --app "$APPI" --resource-group "$RG" \
-       --analytics-query "$kql" -o table > "$out.txt" 2> "$out.err"; then
+  local ws_kql
+  ws_kql="$(printf '%s' "$kql" | to_workspace_kql)"
+  if az monitor log-analytics query --workspace "$WS" \
+       --analytics-query "$ws_kql" -o table > "$out.txt" 2> "$out.err"; then
     rm -f "$out.err"
   else
     log "  WARN: $name failed; see $out.err"

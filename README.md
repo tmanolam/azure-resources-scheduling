@@ -320,25 +320,32 @@ Re-run this step whenever the code in `src/` changes. Configuration changes do *
 
 ### Step 6 – Verify in dry-run mode
 
-Wait for the next 15-minute tick, then query the logs. Use the **Logs** blade of the Application Insights resource, or the CLI (installs the `application-insights` extension on first use):
+Wait for the next 15-minute tick, then query the logs. Use the **Logs** blade of the Application Insights resource (which uses the classic `traces` / `customDimensions` schema), or the CLI against the backing Log Analytics workspace. The scheduler's Application Insights is **workspace-based**, so from the CLI you query the workspace tables — `AppTraces`, with custom dimensions under `Properties[...]` and the timestamp in `TimeGenerated` — not the classic `traces` / `customDimensions` the `az monitor app-insights query` command reads (that command returns no rows against a workspace-based resource):
 
 ```bash
-APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
 RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
+WS=$(az monitor log-analytics workspace show \
+       -g "$RG" --workspace-name log-pwrsched --query customerId -o tsv)
 
-az monitor app-insights query --app "$APPI" --resource-group "$RG" --analytics-query '
-traces
-| where timestamp > ago(1h)
-| where customDimensions["pwrsched.event"] == "pwrsched.decision"
-| project timestamp,
-          resource = tostring(customDimensions["pwrsched.resourceId"]),
-          profile  = tostring(customDimensions["pwrsched.profile"]),
-          desired  = tostring(customDimensions["pwrsched.desiredState"]),
-          actual   = tostring(customDimensions["pwrsched.actualState"]),
-          action   = tostring(customDimensions["pwrsched.action"]),
-          dryRun   = tostring(customDimensions["pwrsched.dryRun"])
-| order by timestamp desc' -o table
+az monitor log-analytics query --workspace "$WS" --analytics-query '
+AppTraces
+| where TimeGenerated > ago(1h)
+| where Properties["pwrsched.event"] == "pwrsched.decision"
+| project TimeGenerated,
+          resource = tostring(Properties["pwrsched.resourceId"]),
+          profile  = tostring(Properties["pwrsched.profile"]),
+          desired  = tostring(Properties["pwrsched.desiredState"]),
+          actual   = tostring(Properties["pwrsched.actualState"]),
+          action   = tostring(Properties["pwrsched.action"]),
+          dryRun   = tostring(Properties["pwrsched.dryRun"])
+| order by TimeGenerated desc' -o table
 ```
+
+> 📝 Note: The alert rules and the Azure Monitor workbook are scoped to the
+> Application Insights resource and use the classic `traces` / `customDimensions`
+> schema — leave them as they are. Only the **CLI** reads the workspace tables
+> (`AppTraces` / `Properties` / `TimeGenerated`). The portal **Logs** blade works
+> either way depending on which resource you open it from.
 
 Check that:
 

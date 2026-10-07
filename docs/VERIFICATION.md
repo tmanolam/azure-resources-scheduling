@@ -40,7 +40,7 @@ items below.
 | V1 | AKS-managed node pool scale sets are not excluded from scheduling | [§6.1](#61-issues-found-during-verification) | ✅ Closed — fixed in code and **verified live** (demo S18, 2026-10-06): node-pool scale set `aks-system-33558043-vmss` logged `aks-managed-node-pool` / `action=none` across two cycles while the cluster was scheduled by the `aks` handler |
 | V2 | One demo resource logged as `unknown-state-skip` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed (W6 `vmss-demo-w6`; `vmss` handler now reads per-instance power state) — confirmed live 2026-10-05: 0 `unknown-state-skip` |
 | V3 | `vmss` handler can't read Flexible-mode scale sets | [§6.1](#61-issues-found-during-verification) | ✅ Fixed in code (Uniform: single `list(expand=instanceView)`; Flexible: `HandlerSkip("vmss-flexible-unsupported")`, HR-008). **Skip-prefix follow-up fixed** (`4fafb3f`): plan-time skips now use `skipped:<reason>` matching execution-time and the workbook filter. Live check pending (no Flexible scale set in the demo) |
-| V4 | `az monitor app-insights query` returns no rows (workspace-based App Insights) | [§6.2](#62-tooling-notes-found-during-verification) | 🔴 Decision made — CLI tooling to be switched to the workspace (`az monitor log-analytics query`); portal, workbook and alerts unchanged |
+| V4 | `az monitor app-insights query` returns no rows (workspace-based App Insights) | [§6.2](#62-tooling-notes-found-during-verification) | ✅ Fixed (2026-10-07) — CLI tooling (README Step 6, §3.3/§3.4, `collect-evidence.sh`) switched to `az monitor log-analytics query` on the workspace (`AppTraces`/`Properties`/`TimeGenerated`); alerts, workbook and portal queries unchanged |
 | V5 | Custom role missing `virtualMachineScaleSets/virtualMachines/read`; W6 VMSS re-submitted `start` every cycle | [§6.1](#61-issues-found-during-verification) | ✅ Fixed + confirmed live (2026-10-07): RBAC read action added + handler capacity-aware; W6 `actualState=Running`, `action=none` |
 
 ### Live checks carried over from the code review
@@ -206,13 +206,15 @@ must show **No changes**. Run it as the same identity that applied (DP-06).
 
 ### 3.3 Dry-run checklist (one cycle ≈ 15 min)
 
-Query Application Insights (README Step 6 shows the full KQL):
+Query the backing Log Analytics workspace (README Step 6 explains why the CLI
+uses the workspace tables, not `az monitor app-insights query`):
 
 ```bash
-APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
 RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
-az monitor app-insights query --app "$APPI" --resource-group "$RG" \
-  --analytics-query 'traces | where customDimensions["pwrsched.event"] == "pwrsched.decision" | take 50'
+WS=$(az monitor log-analytics workspace show \
+       -g "$RG" --workspace-name log-pwrsched --query customerId -o tsv)
+az monitor log-analytics query --workspace "$WS" \
+  --analytics-query 'AppTraces | where Properties["pwrsched.event"] == "pwrsched.decision" | take 50'
 ```
 
 Verify:
@@ -246,13 +248,20 @@ app (status 🔍 in the [§0 tracker](#0-status-tracker)). Run these checks duri
 the dry run, then update the tracker and the [results log](#6-results-log).
 Let the scheduler run for **at least 3 hours** before the count-based checks.
 
-Set up once:
+Set up once. The scheduler's Application Insights is **workspace-based**, so the
+CLI queries the Log Analytics workspace tables — `AppTraces` / `AppRequests` /
+`AppExceptions`, custom dimensions under `Properties[...]`, timestamp
+`TimeGenerated`, request name `OperationName` — not the classic `traces` /
+`customDimensions` / `timestamp` that `az monitor app-insights query` reads
+against a workspace-based resource (it returns no rows). The alerts and workbook
+stay on the classic schema in the App Insights scope (see §6.2 / V4).
 
 ```bash
-APPI=$(terraform -chdir=../infra/scheduler output -raw application_insights_name)
 RG=$(terraform -chdir=../infra/scheduler output -raw resource_group_name)
 FUNC_APP=$(terraform -chdir=../infra/scheduler output -raw function_app_name)
-q() { az monitor app-insights query --app "$APPI" --resource-group "$RG" --analytics-query "$1" -o table; }
+WS=$(az monitor log-analytics workspace show \
+       -g "$RG" --workspace-name log-pwrsched --query customerId -o tsv)
+q() { az monitor log-analytics query --workspace "$WS" --analytics-query "$1" -o table; }
 ```
 
 | Finding | Check | Pass condition |
@@ -269,35 +278,35 @@ q() { az monitor app-insights query --app "$APPI" --resource-group "$RG" --analy
 **Query 1 — decision fields (H1, N6):**
 
 ```bash
-q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
-| project runId = customDimensions["pwrsched.runId"], resourceId = customDimensions["pwrsched.resourceId"],
-  type = customDimensions["pwrsched.type"], profile = customDimensions["pwrsched.profile"],
-  desiredState = customDimensions["pwrsched.desiredState"], actualState = customDimensions["pwrsched.actualState"],
-  action = customDimensions["pwrsched.action"], dryRun = customDimensions["pwrsched.dryRun"],
-  result = customDimensions["pwrsched.result"], error = customDimensions["pwrsched.error"] | take 20'
+q 'AppTraces | where TimeGenerated > ago(1h) | where Properties["pwrsched.event"] == "pwrsched.decision"
+| project runId = Properties["pwrsched.runId"], resourceId = Properties["pwrsched.resourceId"],
+  type = Properties["pwrsched.type"], profile = Properties["pwrsched.profile"],
+  desiredState = Properties["pwrsched.desiredState"], actualState = Properties["pwrsched.actualState"],
+  action = Properties["pwrsched.action"], dryRun = Properties["pwrsched.dryRun"],
+  result = Properties["pwrsched.result"], error = Properties["pwrsched.error"] | take 20'
 ```
 
 **Query 2 — SQL MI state (C3):** needs at least one tagged SQL MI in scope.
 
 ```bash
-q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
-| where tostring(customDimensions["pwrsched.type"]) =~ "Microsoft.Sql/managedInstances"
-| summarize count() by actualState = tostring(customDimensions["pwrsched.actualState"])'
+q 'AppTraces | where TimeGenerated > ago(1h) | where Properties["pwrsched.event"] == "pwrsched.decision"
+| where tostring(Properties["pwrsched.type"]) =~ "Microsoft.Sql/managedInstances"
+| summarize count() by actualState = tostring(Properties["pwrsched.actualState"])'
 ```
 
 **Query 3 — invocations per hour (M4, N3):**
 
 ```bash
-q 'requests | where timestamp > ago(3h) | where operation_Name == "reconcile"
-| summarize invocations = count() by bin(timestamp, 1h)'
+q 'AppRequests | where TimeGenerated > ago(3h) | where OperationName == "reconcile"
+| summarize invocations = count() by bin(TimeGenerated, 1h)'
 ```
 
 **Query 4 — host storage errors (M4):**
 
 ```bash
-q 'traces | where timestamp > ago(3h) | where severityLevel >= 3
-| where message has_any ("AzureWebJobsStorage", "Storage", "lease", "AuthorizationPermissionMismatch")
-| project timestamp, message | take 20'
+q 'AppTraces | where TimeGenerated > ago(3h) | where SeverityLevel >= 3
+| where Message has_any ("AzureWebJobsStorage", "Storage", "lease", "AuthorizationPermissionMismatch")
+| project TimeGenerated, Message | take 20'
 ```
 
 **Past-due test (M4):** stop the app for longer than one interval, then start it.
@@ -311,14 +320,14 @@ az functionapp start -g "$RG" -n "$FUNC_APP"
 **Query 5 — past-due run (M4):** run about 5 minutes after the restart.
 
 ```bash
-q 'traces | where timestamp > ago(30m) | where message startswith "pwrsched: timer past due" | project timestamp, message'
+q 'AppTraces | where TimeGenerated > ago(30m) | where Message startswith "pwrsched: timer past due" | project TimeGenerated, Message'
 ```
 
 **Query 6 — summaries per hour (N3):** compare with Query 3 for the same hours.
 
 ```bash
-q 'traces | where timestamp > ago(3h) | where customDimensions["pwrsched.event"] == "pwrsched.summary"
-| summarize summaries = count() by bin(timestamp, 1h)'
+q 'AppTraces | where TimeGenerated > ago(3h) | where Properties["pwrsched.event"] == "pwrsched.summary"
+| summarize summaries = count() by bin(TimeGenerated, 1h)'
 ```
 
 **Mixed-case RG test (N4):** in the demo tenant, W2's resource group
@@ -331,10 +340,10 @@ put one small VM with no schedule tags of its own in it, and tag **only the reso
 **Query 7 — RG inheritance (N4):**
 
 ```bash
-q 'traces | where timestamp > ago(1h) | where customDimensions["pwrsched.event"] == "pwrsched.decision"
-| where tostring(customDimensions["pwrsched.resourceId"]) contains "RG-PwrSched-CaseTest"
-| project resourceId = customDimensions["pwrsched.resourceId"], profile = customDimensions["pwrsched.profile"],
-  result = customDimensions["pwrsched.result"]'
+q 'AppTraces | where TimeGenerated > ago(1h) | where Properties["pwrsched.event"] == "pwrsched.decision"
+| where tostring(Properties["pwrsched.resourceId"]) contains "RG-PwrSched-CaseTest"
+| project resourceId = Properties["pwrsched.resourceId"], profile = Properties["pwrsched.profile"],
+  result = Properties["pwrsched.result"]'
 ```
 
 Checklist:
@@ -501,6 +510,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-06 | T-603 — GO-LIVE | ✅ Done (live) | **Scheduler flipped to live (`dry_run=false`) with AKS in scope.** Set `dry_run=false` in `infra/tenants/demo.tfvars`; `./infra/deploy.sh demo plan` showed **exactly one change** — `pwrsched:dryRun "true"→"false"`, `0 add / 1 change / 0 destroy` (strict §4 / IAC-008 checkpoint met; DP-04/DP-05 `ignore_changes` held, DP-06 no role churn). Applied 14:15 UTC (~21:15 BKK). **First live cycle 14:15:04 UTC:** `dryRun=false` on all decisions; the one real action was **`aks-demo-w12` → `action=stop, result=submitted`** (cluster was Running, past the 17:30 BKK stop boundary). All already-stopped dev resources `already-converged`; **W10 `already-converged`** (user manually stopped it just before go-live); exclusions held live (W4 `schedule-disabled`, W9 `production-excluded`, no Platform-MG/W11). **Control-plane confirmation (SEC-008):** `az aks show` → `powerState=Stopped`; Activity Log `Stop Managed Cluster` (Started 14:15:04.49, Accepted 14:15:04.91) with **caller `595bf154-2328-4066-a465-1ed0b9073ea9` = the scheduler managed-identity principal**. Summary 14:15:04Z: `evaluated=11, started=0, stopped=1, skipped=10, failed=0`; **no `capReached`**, alerts quiet. SQL MI (C3) remains not tested — no SQL MI in scope. | Kiro |
 | 2026-10-06 | Review of go-live | ✅ Signed off | Review of `f043eea`…`afe862d` and all docs. **Signed off:** T-602 (full business-day dry run), H2 (both alerts fired live — also confirms the V4 reasoning that alerts work in the App Insights scope), T-603 go-live (only `pwrsched:dryRun` changed; first live cycle stopped AKS, confirmed at the control plane with the scheduler identity in the Activity Log), V1 closed live (S18), V3 `skipped:` prefix fix (summary `skipped` count includes plan-time skips). Tests 169 passed, ruff clean. **Open:** Phase B live checks (§4.1, new tracker row PB), V3 live check (no Flexible scale set), V4 CLI tooling, C3 not tested (SQL MI out of scope). | Claude |
 | 2026-10-07 | V5 | ✅ Fixed + confirmed live | First live morning (Phase B): W6 `vmss-demo-w6` logged `actualState=Stopped`/`action=start`/`result=submitted` every cycle from 01:30 UTC (08:30 BKK) despite the instance being `PowerState/running`. Root cause: custom role lacked `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read`, so ARM authorization-filtered the per-instance list to empty and the handler read the running scale set as `deallocated` (capacity-0 branch). Fix 1: added the read action to `infra/modules/rbac/main.tf` + REQUIREMENTS §11.1 (demo apply `0 add / 1 change / 0 destroy`, role def updated in-place). Fix 2: `src/handlers/vmss.py` now reads `sku.capacity` from the existing `virtual_machine_scale_sets.get` and returns `unknown` (not `deallocated`) when the instance list is empty but capacity > 0, so a future permission gap is a visible skip, not silent churn. Verified: pytest 162 passed/8 skipped, strict SDK-surface 8 passed, ruff clean, `terraform fmt`/`validate` clean. Re-published code; **04:00:03 UTC cycle: W6 `actualState=Running`, `action=none`, `result=already-converged`** — churn ended. | Kiro |
+| 2026-10-07 | V4 | ✅ Fixed | Switched the documented **CLI** evidence tooling to the backing Log Analytics workspace (the App Insights is workspace-based, so `az monitor app-insights query` returns no rows). README Step 6, VERIFICATION §3.3 and §3.4 (q() helper + Queries 1–7) now use `az monitor log-analytics query --workspace <customerId>` with `AppTraces`/`AppRequests`/`AppExceptions`, `Properties["pwrsched.*"]`, `TimeGenerated`, `OperationName`. `demo/scripts/collect-evidence.sh` resolves the workspace customerId and translates the saved portal `.kql` files to the workspace schema on the fly (traces→AppTraces, customDimensions→Properties, timestamp→TimeGenerated, etc.). **Left unchanged:** the four alert rules, the day-2 workbook, and the portal `.kql` files (classic `traces`/`customDimensions` in the App Insights scope — proven working by H2 live and the workbook). Added schema notes in README Step 6 and §3.4. `bash -n demo/scripts/collect-evidence.sh` clean. | Kiro |
 
 ### 6.1 Issues found during verification
 
@@ -744,18 +754,18 @@ fallback used) and by running the handler's SDK calls as a privileged identity
 
 ### 6.2 Tooling notes found during verification
 
-These are documentation/tooling observations, kept **separate** from the query
-snippets in the README and §3.4 (those are intentionally left as-is pending a
-decision). Recorded here for the reviewer.
+These are documentation/tooling observations. V4 (below) is now **implemented**:
+the CLI snippets in the README and §3.4 query the Log Analytics workspace, while
+the alerts, workbook and portal queries stay on the classic App Insights schema.
 
 #### V4 — `az monitor app-insights query` returns no rows (workspace-based App Insights)
 
 | | |
 |---|---|
 | **Severity** | Low (tooling / docs; no product impact) |
-| **Status** | 🔴 Decision made (review 2026-10-06) — implementation pending |
+| **Status** | ✅ Fixed (2026-10-07) — CLI tooling switched to the workspace; alerts, workbook and portal queries unchanged |
 | **Found** | 2026-10-06, while collecting the morning start-window evidence (dry-run) |
-| **Location** | README Step 6; VERIFICATION §3.4 (all queries); `demo/scripts/collect-evidence.sh` |
+| **Location** | README Step 6; VERIFICATION §3.3/§3.4 (all queries); `demo/scripts/collect-evidence.sh` |
 
 **Description.** The documented evidence queries use
 `az monitor app-insights query --app appi-pwrsched …`. Against the demo
@@ -793,16 +803,17 @@ alerts, the portal Logs blade opened from Application Insights, and the day-2
 workbook — still work with `traces` / `customDimensions` (the workbook shows data).
 Only `az monitor app-insights query` returns nothing.
 
-- [ ] **Switch the CLI tooling to the workspace:** README Step 6 (CLI part), the
-  §3.4 `q()` helper and `demo/scripts/collect-evidence.sh` use
+- [x] **Switch the CLI tooling to the workspace:** README Step 6 (CLI part), the
+  §3.3 one-liner, the §3.4 `q()` helper and `demo/scripts/collect-evidence.sh` now use
   `az monitor log-analytics query --workspace <customerId>` with `AppTraces`,
   `Properties["pwrsched.*"]` and `TimeGenerated` (and `AppRequests` /
-  `OperationName` for Query 3).
-- [ ] **Keep unchanged:** the alert rules, the workbook and the portal queries
+  `OperationName` for Query 3). The script translates the saved `.kql` files to
+  the workspace schema on the fly, so the files stay portal/workbook-ready.
+- [x] **Keep unchanged:** the alert rules, the workbook and the portal queries
   (`traces` / `customDimensions` in the Application Insights scope).
-- [ ] **Add a short note** in README and §3.4 explaining the two table schemas, so
+- [x] **Add a short note** in README Step 6 and §3.4 explaining the two table schemas, so
   nobody "fixes" the alerts by switching them to `AppTraces`.
-- [ ] H2 (S15) proves the alerts fire live with the current queries.
+- [x] H2 (S15) proves the alerts fire live with the current queries (demo 2026-10-06).
 
 **Note.** This is tooling only. The telemetry itself is correct and complete
 (H1/N3/N6 observed via the workspace query — see the 2026-10-06 results-log row).
