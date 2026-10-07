@@ -4,7 +4,7 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-VERIFY-001 |
 | Related | [REQUIREMENTS.md](REQUIREMENTS.md), [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../README.md](../README.md), [archived implementation docs](archive/README.md) |
-| Last updated | 2026-10-06 |
+| Last updated | 2026-10-07 |
 | Scope | How to verify the scheduler — static checks (T-601), live dry-run (T-602), go-live (T-603) |
 
 This runbook is the repeatable procedure for verifying the scheduler and is the
@@ -73,9 +73,9 @@ python -m pip install pytest tzdata     # once
 python -m pytest -q
 ```
 
-**Expected:** all tests pass (currently **161 passed, 8 skipped**). The 8 skipped
+**Expected:** all tests pass (currently **162 passed, 8 skipped**). The 8 skipped
 are the SDK surface checks, which need `src/requirements.txt` installed and run in
-the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 169 pass. The
+the strict `sdk-surface` CI job (§1.3). With the SDKs installed, all 170 pass. The
 suite covers the pure evaluator (timezones, midnight crossing, overrides),
 discovery (paging, Resource Graph joins and power state), selection (production
 hard-exclusion and its fail-safe, tag precedence, scope exclusion),
@@ -512,7 +512,7 @@ log it as a new issue with a `V` prefix (V1, V2, …), fix it, and re-run the ch
 | 2026-10-06 | Review of go-live | ✅ Signed off | Review of `f043eea`…`afe862d` and all docs. **Signed off:** T-602 (full business-day dry run), H2 (both alerts fired live — also confirms the V4 reasoning that alerts work in the App Insights scope), T-603 go-live (only `pwrsched:dryRun` changed; first live cycle stopped AKS, confirmed at the control plane with the scheduler identity in the Activity Log), V1 closed live (S18), V3 `skipped:` prefix fix (summary `skipped` count includes plan-time skips). Tests 169 passed, ruff clean. **Open:** Phase B live checks (§4.1, new tracker row PB), V3 live check (no Flexible scale set), V4 CLI tooling, C3 not tested (SQL MI out of scope). | Claude |
 | 2026-10-07 | V5 | ✅ Fixed + confirmed live | First live morning (Phase B): W6 `vmss-demo-w6` logged `actualState=Stopped`/`action=start`/`result=submitted` every cycle from 01:30 UTC (08:30 BKK) despite the instance being `PowerState/running`. Root cause: custom role lacked `Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read`, so ARM authorization-filtered the per-instance list to empty and the handler read the running scale set as `deallocated` (capacity-0 branch). Fix 1: added the read action to `infra/modules/rbac/main.tf` + REQUIREMENTS §11.1 (demo apply `0 add / 1 change / 0 destroy`, role def updated in-place). Fix 2: `src/handlers/vmss.py` now reads `sku.capacity` from the existing `virtual_machine_scale_sets.get` and returns `unknown` (not `deallocated`) when the instance list is empty but capacity > 0, so a future permission gap is a visible skip, not silent churn. Verified: pytest 162 passed/8 skipped, strict SDK-surface 8 passed, ruff clean, `terraform fmt`/`validate` clean. Re-published code; **04:00:03 UTC cycle: W6 `actualState=Running`, `action=none`, `result=already-converged`** — churn ended. | Kiro |
 | 2026-10-07 | V4 | ✅ Fixed | Switched the documented **CLI** evidence tooling to the backing Log Analytics workspace (the App Insights is workspace-based, so `az monitor app-insights query` returns no rows). README Step 6, VERIFICATION §3.3 and §3.4 (q() helper + Queries 1–7) now use `az monitor log-analytics query --workspace <customerId>` with `AppTraces`/`AppRequests`/`AppExceptions`, `Properties["pwrsched.*"]`, `TimeGenerated`, `OperationName`. `demo/scripts/collect-evidence.sh` resolves the workspace customerId and translates the saved portal `.kql` files to the workspace schema on the fly (traces→AppTraces, customDimensions→Properties, timestamp→TimeGenerated, etc.). **Left unchanged:** the four alert rules, the day-2 workbook, and the portal `.kql` files (classic `traces`/`customDimensions` in the App Insights scope — proven working by H2 live and the workbook). Added schema notes in README Step 6 and §3.4. `bash -n demo/scripts/collect-evidence.sh` clean. | Kiro |
-| 2026-10-07 | V3 (live) | ✅ Pass | Flexible-mode VMSS live check. Created a throwaway 1-instance **Flexible** scale set `vmss-demo-v3flex` (dev, `rg-demo-vmss`, eastasia, `Standard_B2ts_v2`), tagged `schedule-profile=weekday-0830-1730`. Across 6 cycles (05:45–07:00 UTC) it logged `action=none`, `actual=Unknown`, `result=skipped:vmss-flexible-unsupported` — **not** `state-read-failed`, `failed=0`, and the `skipped:` prefix (so the workbook "Failed or skipped" panel and the summary `skipped` count include it). Confirms the V3/HR-008 Flexible path end-to-end. **Deleted** the VMSS afterwards (baseline restored). | Kiro |
+| 2026-10-07 | V3 (live) | ✅ Pass | Flexible-mode VMSS live check. Created a throwaway 1-instance **Flexible** scale set `vmss-demo-v3flex` (dev, `rg-demo-vmss`, eastasia, `Standard_B2ts_v2`), tagged `schedule-profile=weekday-0830-1730`. Across 6 cycles (05:45–07:00 UTC) it logged `action=none`, `actual=Unknown`, `result=skipped:vmss-flexible-unsupported` — **not** `state-read-failed`, `failed=0`, and the `skipped:` prefix (so the workbook "Failed or skipped" panel and the summary `skipped` count include it). Confirms the V3/HR-008 Flexible path end-to-end. **Deleted** the VMSS afterwards. **Note:** `az vmss create` also auto-created a load balancer (`vmss-demo-v3flexLB`) and NSG (`vmss-demo-v3flexNSG`); `az vmss delete` does **not** remove them, so both were deleted separately (verified `rg-demo-vmss` back to only `vmss-demo-w6`) — baseline restored. When running the V3 check in a real tenant, delete the auto-created LB/NSG too (or create the Flexible VMSS with `--load-balancer ""`). | Kiro |
 | 2026-10-07 | S14 (Phase B) | ✅ Pass | Action cap + OBS-005. Set `pwrsched:maxActionsPerRun=2` (via `az appconfig kv set --auth-mode login` — the store has shared keys disabled, SEC-005) and a dev-subscription override to force many transitions. 07:45 UTC cycle: `pwrsched.capReached` event logged; summary `evaluated=12, started=2, capReached=true` (only the cap's worth submitted, rest deferred). OBS-005 alert `pwrsched-max-actions-cap` reached `monitorCondition=Fired` at 07:46:28 UTC. **Restored** cap=200 and cleared the dev override; resources recovered over the next cycles. | Kiro |
 | 2026-10-07 | S11a (Phase B) | ✅ Pass | Powered-off (not deallocated) VM, inside hours (H4). `az vm run-command … sudo poweroff` on W5 (`rg-demo-poweroff`) → `PowerState/stopped` (allocated, billed). 08:15 UTC cycle read `actual=StoppedAllocated, desired=Running, action=start, result=submitted` — the handler correctly distinguished an OS-level poweroff from `deallocated` and started it. | Kiro |
 | 2026-10-07 | S10 (Phase B) | ✅ Pass | Drift correction. Stopped W7 PostgreSQL (`rg-demo-db`) out of band during business hours → 08:30 UTC cycle `actual=Stopped, desired=Running, action=start, result=submitted`; W7 back to `Ready` within the cycle. Self-heal (NFR-003) confirmed live; also models the 7-day platform auto-restart (HR-003). | Kiro |
@@ -639,7 +639,10 @@ ruff clean.
 
 - [x] The resource is identified (W6 `vmss-demo-w6`) and the root cause recorded here.
 - [x] After the fix, a full dry-run cycle shows **0** `unknown-state-skip` results for in-scope resources (demo 2026-10-05, 14:00 UTC cycle: `already-converged`×7 incl. W6, `production-excluded`×1, `schedule-disabled`×1 — no unknowns). W6 now reads `actualState=Stopped` (it was manually deallocated), proving the handler reads real instance state.
-- [ ] Live check with W6 **running** (not just stopped): confirm `get_state` returns `running` and the engine submits a deallocate at the stop boundary (covered by demo scenario during Phase B / S1L; also exercised by the `running`-instance unit tests).
+- [x] Live check with W6 **running**: confirmed 2026-10-07 — after the V5 role fix,
+  W6 reads `actualState=Running` live (04:00 UTC cycle, `already-converged`), so
+  the handler reads real per-instance running state. The **running→deallocate at
+  the stop boundary** is the PB 17:30 item (same as the V2 running path there).
 
 #### V3 — `vmss` handler can't read Flexible-mode scale sets
 
