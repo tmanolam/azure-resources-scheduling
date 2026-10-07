@@ -12,15 +12,16 @@ This page lists what the Resource Power Scheduler does **today**, how to use eac
 capability, and the evidence that it works. It only claims what has been proven:
 each use case shows its current evidence status. Phase B (the first live business
 day, [VERIFICATION §4.1](VERIFICATION.md#41-phase-b--live-checks-after-go-live))
-completed on 2026-10-07, so the scheduling, override, safety and self-healing use
-cases are now proven live.
+completed on 2026-10-07 except two re-runs (S4, S10b), so most scheduling, override,
+safety and self-healing use cases are now proven live; UC-10 and UC-18 are 🟢 until
+the re-runs pass.
 
 **Status legend**
 
 | Status | Meaning |
 |---|---|
 | ✅ Proven live | Verified on real resources with `dryRun=false` (or a behaviour that is identical in dry run and live, such as selection and exclusion) |
-| 🟢 Proven in dry run | The scheduler made the correct decisions; the live action is checked in Phase B |
+| 🟢 Proven in part | Proven in dry run, or only partly proven live; the remaining check is listed in the row |
 | 🔍 Pending Phase B | Not yet observed; scheduled in VERIFICATION §4.1 |
 | ⬜ Not tested | Supported in code and unit-tested, but not verified on Azure |
 | ❌ Not supported | Out of scope, or no saving possible |
@@ -55,7 +56,7 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 
 | ID | Use case | How to use it | Evidence | Status |
 |---|---|---|---|---|
-| UC-10 | **Work late.** Keep resources running past the stop time. | `schedule-override-state=running` + `schedule-override-until=<time+07:00>` on the resource, group or subscription. See [Ad-hoc start or stop](../README.md#ad-hoc-start-or-stop-override). | S4 (2026-10-07): W3 override `running` held it past 17:30 (`action=start, submitted`); schedule resumed (`action=stop`) after the override was cleared. | ✅ |
+| UC-10 | **Work late.** Keep resources running past the stop time. | `schedule-override-state=running` + `schedule-override-until=<time+07:00>` on the resource, group or subscription. See [Ad-hoc start or stop](../README.md#ad-hoc-start-or-stop-override). | S5b (2026-10-07) proved an override `running` starts a stopped resource outside hours, and S5 proved the schedule resumes when an override expires. **Not yet proven:** an override set *before* 17:30 prevents the 17:30 stop (the first S4 run added the override after the stop). S4 re-run pending (VERIFICATION §4.1). | 🟢 |
 | UC-11 | **Stop early.** Stop resources during business hours. | `schedule-override-state=stopped` + `schedule-override-until`. | S5 (2026-10-07): W3 override `stopped` → stopped during business hours; started again after the override expired. | ✅ |
 | UC-12 | **Ad-hoc start** in the evening or at the weekend. | `schedule-override-state=running` for a period. | S5b (2026-10-07): W1 override `running` in the evening → `action=start, submitted`; stopped again after the override was cleared. | ✅ |
 
@@ -73,7 +74,7 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 
 | ID | Use case | How to use it | Evidence | Status |
 |---|---|---|---|---|
-| UC-18 | **Correct manual changes.** A resource started by hand outside hours is stopped again within one cycle (also covers the 7-day database auto-restart). | Automatic. | S10 (2026-10-07): W7 PostgreSQL started out of band → `action=start`/corrected within the cycle, self-healed to `Ready`. | ✅ |
+| UC-18 | **Correct manual changes.** A resource started by hand outside hours is stopped again within one cycle (also covers the 7-day database auto-restart). | Automatic. | S10 (2026-10-07): W7 stopped by hand during business hours was started again in the next cycle (drift corrected live). **Not yet proven:** the outside-hours direction (started by hand or by the 7-day auto-restart → stopped); S10b pending (VERIFICATION §4.1). | 🟢 |
 | UC-19 | **VM shut down from inside the OS** (still billed) is deallocated outside hours, or started again inside hours. | Automatic. | S11a (inside hours, 2026-10-07): W5 `StoppedAllocated` → `action=start`. S11b (outside hours, 2026-10-07): W5 `StoppedAllocated` → `action=stop` → `deallocated`. | ✅ |
 | UC-20 | **Missed run recovery.** If the scheduler was down, it catches up as soon as it restarts. | Automatic. | M4 / S16: app stopped 20 minutes; the past-due recovery run started 20 seconds after restart and the normal 15-minute cadence resumed. | ✅ |
 
@@ -139,3 +140,4 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 | 2026-10-07 | Initial version: 23 use cases with evidence status, resource type matrix, limitations. Phase B items marked 🔍; update them as VERIFICATION §4.1 completes. |
 | 2026-10-07 | "Production workloads" row points to REQUIREMENTS FR-029 and warns against relabelling the `environment` tag. |
 | 2026-10-07 | **Phase B complete.** Flipped 🔍 → ✅: UC-01 (full live day), UC-02 (live reverse-order stop), UC-10/UC-11/UC-12 (overrides), UC-16 (cap), UC-18/UC-19 (self-heal), UC-22 (cap alert fired). Resource-type matrix: VM/VMSS-Uniform/AKS/PostgreSQL/MySQL live stop and start columns now ✅ (2026-10-07). Evidence in VERIFICATION §6. |
+| 2026-10-07 | Review correction: UC-10 and UC-18 set back to 🟢. The first S4 run added the override after the 17:30 stop (proving an ad-hoc restart, not "work late"), and S10 proved drift in the inside-hours direction only. Re-runs S4 and S10b pending in VERIFICATION §4.1. |
