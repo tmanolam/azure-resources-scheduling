@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # DM-05 — Register the resource providers the demo workloads need, in each
-# subscription. See docs/DEMO_TENANT_PLAN.md §3 (prerequisites) and §4 (workloads).
+# subscription. See docs/archive/demo-verification/DEMO_TENANT_PLAN.md §3 (prerequisites) and §4 (workloads).
 #
 # Idempotent: re-running is safe. `az provider register` is a no-op for a
 # provider that is already Registered, and registration is per-subscription.

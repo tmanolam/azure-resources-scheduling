@@ -131,6 +131,28 @@
       }
     },
     {
+      "type": 1,
+      "name": "hours-saved-note",
+      "content": {
+        "json": "**Estimated hours avoided.** Built from the summary counts `desiredStopped` / `desiredRunning` (v0.7, SC-04), so it works even when per-resource no-op records are switched off (`logConvergedDecisions = false`). Each cycle counts as 15 minutes. It counts resources the schedule wants **stopped**, including any already stopped, so it measures scheduled off-time, not a bill. Exclude dry-run days when quoting savings. Multiply by each resource's hourly rate for a currency figure."
+      }
+    },
+    {
+      "type": 3,
+      "name": "hours-saved",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where customDimensions[\"pwrsched.event\"] == \"pwrsched.summary\"\n| extend desiredStopped = toint(customDimensions[\"pwrsched.desiredStopped\"]),\n         desiredRunning = toint(customDimensions[\"pwrsched.desiredRunning\"])\n// Only cycles from v0.7 onwards carry these counts (SC-04).\n| where isnotnull(desiredStopped)\n| extend Day = format_datetime(datetime_utc_to_local(timestamp, \"Asia/Bangkok\"), \"yyyy-MM-dd\")\n// Each cycle covers 15 minutes (reconcile_schedule); adjust if you change the interval.\n| summarize ['Resource-hours avoided'] = round(sum(desiredStopped) * 15.0 / 60.0, 1),\n            ['Resource-hours scheduled to run'] = round(sum(desiredRunning) * 15.0 / 60.0, 1),\n            Cycles = count()\n          by ['Day (Bangkok)'] = Day\n| order by ['Day (Bangkok)'] desc",
+        "size": 0,
+        "title": "Estimated resource-hours avoided per day (Bangkok)",
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "visualization": "table",
+        "noDataMessage": "No summaries with desiredStopped yet (requires v0.7 code)."
+      }
+    },
+    {
       "type": 3,
       "name": "issues-by-type",
       "content": {

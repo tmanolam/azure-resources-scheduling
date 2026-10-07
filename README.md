@@ -79,9 +79,11 @@ azure-power-scheduler/
 ├── README.md
 ├── docs/
 │   ├── REQUIREMENTS.md
-│   ├── VERIFICATION.md             # live verification runbook + status tracker
+│   ├── USE_CASES.md                # supported use cases, with evidence status
+│   ├── VERIFICATION.md             # per-tenant rollout runbook (deploy, dry run, go-live)
+│   ├── SCALING_TASKS.md            # large-tenant workstream (SC-01–SC-06)
 │   ├── presentations/              # solution decks
-│   └── archive/                    # finished implementation docs (tasks, code review)
+│   └── archive/                    # finished work: phase-1 tasks/review, demo verification record
 ├── config/                         # Loaded into App Configuration by Terraform
 │   └── profiles/                   # schedule profiles (settings come from tfvars)
 │       ├── weekday-0830-1730.json   # standard: 08:30–17:30 Mon–Fri, Asia/Bangkok

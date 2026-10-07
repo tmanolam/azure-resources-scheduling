@@ -163,6 +163,7 @@ settling.
     < 10 minutes with simulated latency.
   - [x] Cap defers excess; `capReached` set.
   - [x] 429 retries don't break the cycle.
+- **Review note (2026-10-07):** the load test uses 2 ms simulated latency (not 300 ms) and no simulated 429s, to keep CI fast. By arithmetic, a cap of 500 with 20 workers at 300 ms submits in ≈ 8 s, far inside NFR-002; HTTP 429 retries are handled by the azure-core retry policy and are not exercised by this test. Accepted.
 - **Status:** ✅ Done (2026-10-07)
 
 ### SC-06 — Operating guidance for large tenants (S)

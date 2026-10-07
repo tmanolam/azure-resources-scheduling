@@ -4,14 +4,14 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-USECASES-001 |
 | Audience | Workload owners, platform team, stakeholders |
-| Related | [README.md](../README.md) (how-to steps), [VERIFICATION.md](VERIFICATION.md) (evidence), [REQUIREMENTS.md](REQUIREMENTS.md) (specification) |
+| Related | [README.md](../README.md) (how-to steps), [demo verification record](archive/demo-verification/VERIFICATION.md) (evidence), [VERIFICATION.md](VERIFICATION.md) (per-tenant runbook), [REQUIREMENTS.md](REQUIREMENTS.md) (specification) |
 | Last updated | 2026-10-07 |
 | Evidence basis | Demo tenant: dry run 2026-10-05/06, live since 2026-10-06 21:15 Bangkok, Phase B completed 2026-10-07 (full live business day) |
 
 This page lists what the Resource Power Scheduler does **today**, how to use each
 capability, and the evidence that it works. It only claims what has been proven:
 each use case shows its current evidence status. Phase B (the first live business
-day, [VERIFICATION §4.1](VERIFICATION.md#41-phase-b--live-checks-after-go-live))
+day, [demo verification §4.1](archive/demo-verification/VERIFICATION.md#41-phase-b--live-checks-after-go-live))
 completed on 2026-10-07, including the review re-runs (S4 "work late" with
 expiry, and S10b outside-hours drift), so the scheduling, override, safety and
 self-healing use cases are now proven live.
@@ -26,8 +26,8 @@ self-healing use cases are now proven live.
 | ⬜ Not tested | Supported in code and unit-tested, but not verified on Azure |
 | ❌ Not supported | Out of scope, or no saving possible |
 
-Scenario IDs (S1, S12, …) refer to [DEMO_TENANT_PLAN §6](DEMO_TENANT_PLAN.md);
-check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
+Scenario IDs (S1, S12, …) refer to [DEMO_TENANT_PLAN §6](archive/demo-verification/DEMO_TENANT_PLAN.md);
+check IDs (C1, H2, …) and issue IDs (V1–V5) refer to the [demo verification record](archive/demo-verification/VERIFICATION.md). "VERIFICATION §…" references in the rows below mean that record.
 
 ---
 
@@ -115,7 +115,7 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 | Container Apps, Container Instances | Backlog (REQUIREMENTS §8.3, CH-01–CH-03) | — |
 | Cosmos DB, Container Registry, Event Hubs, Service Bus | ❌ No stop operation in Azure | — |
 | Flexible scale sets | Limited (skipped) | Tag the member VMs (HR-008). |
-| Large tenants (more than about 200–300 transitions in one cycle) | Limited until the scaling backlog lands | Stagger profiles; REQUIREMENTS §10.1 (SC-01–SC-06). |
+| Large tenants (thousands of resources, hundreds of transitions per cycle) | 🟢 Implemented in v0.7 (SC-01–SC-06): parallel submission per order group, 12-minute timeout, single cap sized from the measured peak (D-09), optional `logConvergedDecisions=false`. Unit- and load-tested in code (5,000 simulated resources); not yet proven live at scale. | Follow README **Large tenants** and the per-tenant runbook (VERIFICATION §2, §4 peak query). |
 
 ---
 
@@ -142,3 +142,4 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to VERIFICATION.
 | 2026-10-07 | **Phase B complete.** Flipped 🔍 → ✅: UC-01 (full live day), UC-02 (live reverse-order stop), UC-10/UC-11/UC-12 (overrides), UC-16 (cap), UC-18/UC-19 (self-heal), UC-22 (cap alert fired). Resource-type matrix: VM/VMSS-Uniform/AKS/PostgreSQL/MySQL live stop and start columns now ✅ (2026-10-07). Evidence in VERIFICATION §6. |
 | 2026-10-07 | Review correction: UC-10 and UC-18 set back to 🟢. The first S4 run added the override after the 17:30 stop (proving an ad-hoc restart, not "work late"), and S10 proved drift in the inside-hours direction only. Re-runs S4 and S10b pending in VERIFICATION §4.1. |
 | 2026-10-07 | Re-runs passed: UC-10 (S4 override holds `desired=Running` outside hours, stops on expiry with the tag untouched) and UC-18 (S10b outside-hours drift → stop) back to ✅. Phase B closed. Evidence in VERIFICATION §6. |
+| 2026-10-07 | Demo verification record archived (`docs/archive/demo-verification/`); evidence links updated. "Large tenants" row updated for the v0.7 scaling workstream. |

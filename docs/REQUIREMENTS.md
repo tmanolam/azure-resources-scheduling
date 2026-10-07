@@ -7,7 +7,7 @@
 | Last updated | 2026-10-07 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | v0.7 — demo tenant **live** since 2026-10-06, Phase B complete 2026-10-07 (see VERIFICATION.md). OI-01 is set per tenant at deployment; **D-09 decided (single `maxActionsPerRun`, option A)** — large-tenant scaling workstream (§10.1, SC-01–SC-06) in progress |
+| Status | v0.7 — demo tenant **live** since 2026-10-06, Phase B complete 2026-10-07 (evidence: archive/demo-verification/VERIFICATION.md; per-tenant runbook: VERIFICATION.md). OI-01 is set per tenant at deployment; **D-09 decided (single `maxActionsPerRun`, option A)** — large-tenant scaling workstream (§10.1, SC-01–SC-06) in progress |
 
 ## Table of Contents
 

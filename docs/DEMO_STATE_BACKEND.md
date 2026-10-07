@@ -4,7 +4,7 @@
 |---|---|
 | Document ID | AZ-PWRSCHED-DEMO-STATE-001 |
 | Status | **Done** (2026-10-06). Both roots migrated to the remote azurerm backend (`demosatfstate`). |
-| Related | [DEMO_TENANT_PLAN.md](DEMO_TENANT_PLAN.md), [../demo/README.md](../demo/README.md), [../infra/tenants/demo.backend.hcl.example](../infra/tenants/demo.backend.hcl.example) |
+| Related | [DEMO_TENANT_PLAN.md](archive/demo-verification/DEMO_TENANT_PLAN.md), [../demo/README.md](../demo/README.md), [../infra/tenants/demo.backend.hcl.example](../infra/tenants/demo.backend.hcl.example) |
 | Created | 2026-10-06 |
 
 ## Why

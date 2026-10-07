@@ -1,7 +1,7 @@
 # demo/landing-zone — CAF-lite management group hierarchy, subscription
 # placement + tags, and budgets for the disposable demo tenant.
 #
-# See docs/DEMO_TENANT_PLAN.md §2.2 (hierarchy), §2.1 (subscriptions/tags) and
+# See docs/archive/demo-verification/DEMO_TENANT_PLAN.md §2.2 (hierarchy), §2.1 (subscriptions/tags) and
 # §4.3/DM-13 (budgets). This is demo-only infrastructure; it lives under demo/
 # and never changes the shipped product (infra/).
 #

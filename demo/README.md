@@ -2,10 +2,11 @@
 
 > Step-by-step guide to build, verify and demonstrate the Azure Resource Power
 > Scheduler in a disposable demo tenant. This is the operational companion to
-> the plan in [docs/DEMO_TENANT_PLAN.md](../docs/DEMO_TENANT_PLAN.md); it tells
-> you **what to run, in what order**. Task status lives in
-> [TASKS.md](TASKS.md); the verification procedure and results log live in
-> [docs/VERIFICATION.md](../docs/VERIFICATION.md).
+> the plan in [DEMO_TENANT_PLAN.md](../docs/archive/demo-verification/DEMO_TENANT_PLAN.md); it tells
+> you **what to run, in what order**. The demo is built and verified (Phase B closed
+> 2026-10-07): the task tracker and the full verification record are archived in
+> [docs/archive/demo-verification/](../docs/archive/demo-verification/VERIFICATION.md).
+> In this runbook, "VERIFICATION §…" means that archived demo record.
 
 | Item | Value |
 |---|---|
@@ -40,7 +41,6 @@
 ```
 demo/
 ├── README.md                  # this runbook
-├── TASKS.md                   # build task tracker (DM-10–DM-44)
 ├── .gitignore                 # ignores evidence/, real *.tfvars, state
 ├── landing-zone/              # MGs, subscription placement + tags, budgets (DM-10–DM-14)
 │   ├── main.tf providers.tf variables.tf budgets.tf outputs.tf
@@ -86,7 +86,7 @@ export ARM_TENANT_ID=<demo-tenant-id>
 
 ## 1. Prerequisites
 
-Manual steps (DEMO_TENANT_PLAN §3). Confirm each in [TASKS.md](TASKS.md).
+Manual steps (DEMO_TENANT_PLAN §3). Status is recorded in the archived [DEMO_TASKS.md](../docs/archive/demo-verification/DEMO_TASKS.md).
 
 | Ref | Step |
 |---|---|
