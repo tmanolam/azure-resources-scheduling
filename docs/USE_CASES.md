@@ -6,7 +6,7 @@
 | Audience | Workload owners, platform team, stakeholders |
 | Related | [README.md](../README.md) (how-to steps), [demo verification record](archive/demo-verification/VERIFICATION.md) (evidence), [VERIFICATION.md](VERIFICATION.md) (per-tenant runbook), [REQUIREMENTS.md](REQUIREMENTS.md) (specification) |
 | Last updated | 2026-10-07 |
-| Evidence basis | Demo tenant: dry run 2026-10-05/06, live since 2026-10-06 21:15 Bangkok, Phase B completed 2026-10-07 (full live business day) |
+| Evidence basis | Demo tenant: dry run 2026-10-05/06, verified live 2026-10-06 21:15 Bangkok onward, Phase B completed 2026-10-07 (full live business day). Demo tenant torn down 2026-10-26; the evidence below remains valid (records archived). |
 
 This page lists what the Resource Power Scheduler does **today**, how to use each
 capability, and the evidence that it works. It only claims what has been proven:
@@ -143,3 +143,4 @@ check IDs (C1, H2, …) and issue IDs (V1–V5) refer to the [demo verification 
 | 2026-10-07 | Review correction: UC-10 and UC-18 set back to 🟢. The first S4 run added the override after the 17:30 stop (proving an ad-hoc restart, not "work late"), and S10 proved drift in the inside-hours direction only. Re-runs S4 and S10b pending in VERIFICATION §4.1. |
 | 2026-10-07 | Re-runs passed: UC-10 (S4 override holds `desired=Running` outside hours, stops on expiry with the tag untouched) and UC-18 (S10b outside-hours drift → stop) back to ✅. Phase B closed. Evidence in VERIFICATION §6. |
 | 2026-10-07 | Demo verification record archived (`docs/archive/demo-verification/`); evidence links updated. "Large tenants" row updated for the v0.7 scaling workstream. |
+| 2026-10-26 | Demo tenant torn down. Evidence basis line updated: the verified-live dates stand (records archived), but the tenant no longer exists. Use-case statuses are unchanged — they describe verified behaviour, not current tenant existence. |

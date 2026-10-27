@@ -7,7 +7,7 @@
 | Last updated | 2026-10-07 |
 | Selected option | Option C – Azure Functions (timer-triggered reconciliation engine) |
 | Infrastructure as Code | Terraform (`azurerm` provider 4.x) |
-| Status | v0.7 — demo tenant **live** since 2026-10-06, Phase B complete 2026-10-07 (evidence: archive/demo-verification/VERIFICATION.md; per-tenant runbook: VERIFICATION.md). OI-01 is set per tenant at deployment; **D-09 decided (single `maxActionsPerRun`, option A)** — large-tenant scaling workstream (§10.1, SC-01–SC-06) in progress |
+| Status | v0.7 — demo tenant verified live 2026-10-06/07 (Phase B complete 2026-10-07), then **torn down 2026-10-26** (evidence retained: archive/demo-verification/VERIFICATION.md; per-tenant runbook: VERIFICATION.md). OI-01 is set per tenant at deployment; **D-09 decided (single `maxActionsPerRun`, option A)** — large-tenant scaling workstream (§10.1, SC-01–SC-06) in progress |
 
 ## Table of Contents
 
@@ -679,3 +679,4 @@ Priority: Must
 | 0.6.1 | 2026-10-07 | Added FR-029 (production opt-in design, Won't — only if D-06 is superseded) and a BR-003 note against relabelling the `environment` tag. Status line updated to v0.6. |
 | 0.6.2 | 2026-10-07 | §11.1: added `virtualMachineScaleSets/virtualMachines/instanceView/read` (used by the vmss per-instance fallback; found by the new role/SDK consistency test). |
 | 0.7 | 2026-10-07 | Decision **D-09** (single `maxActionsPerRun`, option A) recorded in §17.1; status line and version updated. Starts the large-tenant scaling workstream (§10.1 SC-01–SC-06): parallel action submission (`maxParallelActions`, FR-034), raised function timeout (SC-02), telemetry-volume control (`logConvergedDecisions`, NFR-011) with new summary counts, cap sizing guidance, load test and large-tenant operating guidance. |
+| 0.7.1 | 2026-10-26 | Status line updated: the reference demo tenant was torn down on 2026-10-26 (`demo/scripts/teardown.sh`). The v0.6–v0.7 verification evidence stands (archived in `docs/archive/demo-verification/`); no requirement changed. Live-at-scale verification of the v0.7 scaling release (SC-01–SC-06) is deferred to the next tenant rollout (VERIFICATION §9). |
